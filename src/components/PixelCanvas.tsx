@@ -265,20 +265,8 @@ export function PixelCanvas() {
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      // Handle pan tool - move incrementally based on mouse delta
-      if (isPanning && lastPanPos) {
-        const container = containerRef.current;
-        if (!container) return;
-
-        const dx = e.clientX - lastPanPos.x;
-        const dy = e.clientY - lastPanPos.y;
-
-        container.scrollLeft -= dx;
-        container.scrollTop -= dy;
-
-        setLastPanPos({ x: e.clientX, y: e.clientY });
-        return;
-      }
+      // Pan is handled by global handlers, skip here
+      if (isPanning) return;
 
       if (!isDrawing) return;
 
@@ -306,9 +294,8 @@ export function PixelCanvas() {
   }, [isDrawing, isPanning, pendingPixels, setPixelsBatch]);
 
   const handleMouseLeave = useCallback(() => {
+    // Don't stop panning when mouse leaves - let global handler manage it
     if (isPanning) {
-      setIsPanning(false);
-      setLastPanPos(null);
       return;
     }
 
@@ -320,18 +307,64 @@ export function PixelCanvas() {
     setPendingPixels([]);
   }, [isDrawing, isPanning, pendingPixels, setPixelsBatch]);
 
+  // Use ref for lastPanPos to avoid effect re-running on every move
+  const lastPanPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    lastPanPosRef.current = lastPanPos;
+  }, [lastPanPos]);
+
+  // Global mouse handlers for panning (so it works even outside canvas)
+  useEffect(() => {
+    if (!isPanning) {
+      return;
+    }
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      const pos = lastPanPosRef.current;
+      if (!pos) return;
+      const container = containerRef.current;
+      if (!container) return;
+
+      const dx = e.clientX - pos.x;
+      const dy = e.clientY - pos.y;
+
+      // High-speed panning - 30x multiplier for fast navigation
+      const speed = 30;
+
+      // Scroll the container (negative because dragging right should show content on the left)
+      container.scrollBy(-dx * speed, -dy * speed);
+
+      lastPanPosRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const handleGlobalMouseUp = () => {
+      setIsPanning(false);
+      setLastPanPos(null);
+    };
+
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isPanning]);
+
   // Prevent context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
   }, []);
 
-  // Handle Cmd/Ctrl + scroll wheel zoom
+  // Handle scroll wheel: Cmd/Ctrl + scroll for zoom, regular scroll for pan
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const handleWheel = (e: WheelEvent) => {
-      // Only zoom if Cmd (Mac) or Ctrl (Windows/Linux) is pressed
+      // Zoom if Cmd (Mac) or Ctrl (Windows/Linux) is pressed
       if (e.metaKey || e.ctrlKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -339,12 +372,13 @@ export function PixelCanvas() {
         const newZoom = Math.max(1, Math.min(100, zoom + delta));
         dispatch({ type: 'SET_ZOOM', zoom: newZoom });
       }
+      // Otherwise allow natural scrolling for panning
     };
 
     // Use non-passive listener to allow preventDefault
     container.addEventListener('wheel', handleWheel, { passive: false });
     return () => container.removeEventListener('wheel', handleWheel);
-  }, [dispatch, zoom, sprite]); // sprite dependency ensures effect runs when container becomes available
+  }, [dispatch, zoom, sprite]);
 
   // Render pending pixels while drawing
   useEffect(() => {
@@ -422,30 +456,50 @@ export function PixelCanvas() {
     );
   }
 
-  return (
-    <div
-      ref={containerRef}
-      className="relative flex items-center justify-center h-full overflow-auto p-4"
-    >
-      <canvas
-        ref={canvasRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseLeave}
-        onContextMenu={handleContextMenu}
-        className={`border border-editor-accent/50 shadow-lg ${
-          currentTool === 'pan'
-            ? isPanning ? 'cursor-grabbing' : 'cursor-grab'
-            : 'cursor-crosshair'
-        }`}
-        style={{
-          imageRendering: 'pixelated',
-        }}
-      />
+  // Calculate canvas dimensions
+  const canvasWidth = sprite.width * zoom;
+  const canvasHeight = sprite.height * zoom;
 
-      {/* 1:1 Preview in bottom right */}
-      <div className="absolute bottom-4 right-4 bg-editor-panel border border-editor-accent/50 rounded-lg p-2 shadow-lg">
+  return (
+    <div className="relative w-full h-full">
+      {/* Scroll container - absolute positioning gives it definite dimensions */}
+      <div
+        ref={containerRef}
+        className="absolute top-0 left-0 right-0 bottom-0 overflow-auto"
+      >
+        {/* Inner content - explicit size larger than container forces scrollbars */}
+        <div
+          style={{
+            width: `${canvasWidth + 32}px`,
+            height: `${canvasHeight + 32}px`,
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+        >
+          <canvas
+            ref={canvasRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            onContextMenu={handleContextMenu}
+            className={`border border-editor-accent/50 shadow-lg block ${
+              currentTool === 'pan'
+                ? isPanning ? 'cursor-grabbing' : 'cursor-grab'
+                : 'cursor-crosshair'
+            }`}
+            style={{
+              imageRendering: 'pixelated',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 1:1 Preview - fixed in corner */}
+      <div
+        className="fixed bg-editor-panel border border-editor-accent/50 rounded-lg p-2 shadow-lg z-50"
+        style={{ bottom: '80px', right: '290px' }}
+      >
         <div className="text-xs text-gray-400 mb-1 text-center">1:1 Preview</div>
         <canvas
           ref={previewRef}

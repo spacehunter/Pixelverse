@@ -187,11 +187,26 @@ export function AnimationTimeline() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleTogglePlay}
-            className={`btn-secondary text-xs px-3 py-1 ${
+            className={`btn-secondary text-xs px-3 py-1 flex items-center gap-1 ${
               isPlaying ? 'bg-editor-highlight' : ''
             }`}
           >
-            {isPlaying ? '⏸ Pause' : '▶ Play'}
+            {isPlaying ? (
+              <>
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="4" width="4" height="16" rx="1"/>
+                  <rect x="14" y="4" width="4" height="16" rx="1"/>
+                </svg>
+                Pause
+              </>
+            ) : (
+              <>
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+                Play
+              </>
+            )}
           </button>
           <button onClick={handleAddFrame} className="btn-secondary text-xs px-2 py-1">
             + Frame
@@ -226,10 +241,13 @@ export function AnimationTimeline() {
                     e.stopPropagation();
                     handleDuplicateFrame(index);
                   }}
-                  className="text-xs hover:text-editor-highlight"
+                  className="text-xs text-gray-400 hover:text-editor-highlight"
                   title="Duplicate frame"
                 >
-                  📋
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2"/>
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2"/>
+                  </svg>
                 </button>
                 <button
                   onClick={e => {

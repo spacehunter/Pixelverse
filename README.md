@@ -6,7 +6,7 @@ AI-powered pixel art sprite editor. Create sprites in seconds with Retro Diffusi
 
 - **AI Sprite Generation** - Generate pixel art from text prompts using Retro Diffusion models (rd-fast, rd-plus)
 - **Drawing Tools** - Pencil, eraser, fill bucket, eyedropper, line, rectangle, circle
-- **Pan & Zoom** - Navigate large canvases with pan tool (H) and zoom up to 100x
+- **Pan & Zoom** - Fast 30x accelerated panning for quick navigation, zoom up to 100x
 - **Layers** - Multiple layers with visibility, opacity, and lock controls
 - **Animation** - Multi-frame animation with adjustable frame durations and playback
 - **Frame Copy/Paste** - Quickly duplicate frames with Cmd/Ctrl+C/V
