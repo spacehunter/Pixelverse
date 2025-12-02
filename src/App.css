@@ -1,0 +1,89 @@
+/* Minimal App styles - most styling is done via Tailwind */
+
+/* Ensure smooth scrolling */
+* {
+  scroll-behavior: smooth;
+}
+
+/* Remove default focus outlines and add custom ones */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid #e94560;
+  outline-offset: 2px;
+}
+
+/* Range input styling */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: #0f3460;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e94560;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+input[type='range']::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e94560;
+  cursor: pointer;
+  border: none;
+}
+
+/* Select styling */
+select {
+  cursor: pointer;
+}
+
+select option {
+  background: #16213e;
+  color: white;
+}
+
+/* Button hover animations */
+button {
+  transition: all 0.15s ease;
+}
+
+/* Scrollbar for overflow areas */
+.overflow-y-auto {
+  scrollbar-width: thin;
+  scrollbar-color: #0f3460 #16213e;
+}
+
+/* Animation for loading spinner */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Tooltip styles (if needed) */
+[title] {
+  position: relative;
+}
