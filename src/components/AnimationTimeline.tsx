@@ -3,30 +3,59 @@ import { useEditor } from '../store/EditorContext';
 
 export function AnimationTimeline() {
   const { state, dispatch } = useEditor();
-  const { sprite, currentFrameIndex, isPlaying } = state;
+  const { sprite, currentFrameIndex, isPlaying, copiedFrame } = state;
   const animationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
 
-  // Animation loop
+  // Use refs to avoid stale closures in animation loop
+  const frameIndexRef = useRef(currentFrameIndex);
+  const spriteRef = useRef(sprite);
+
+  // Keep refs in sync
   useEffect(() => {
-    if (!isPlaying || !sprite || sprite.frames.length <= 1) {
+    frameIndexRef.current = currentFrameIndex;
+  }, [currentFrameIndex]);
+
+  useEffect(() => {
+    spriteRef.current = sprite;
+  }, [sprite]);
+
+  // Animation loop - only depends on isPlaying
+  useEffect(() => {
+    if (!isPlaying) {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
       }
+      lastTimeRef.current = 0;
       return;
     }
 
     const animate = (timestamp: number) => {
+      const currentSprite = spriteRef.current;
+      if (!currentSprite || currentSprite.frames.length <= 1) {
+        return;
+      }
+
       if (!lastTimeRef.current) {
         lastTimeRef.current = timestamp;
       }
 
-      const currentFrame = sprite.frames[currentFrameIndex];
+      const currentIdx = frameIndexRef.current;
+      const currentFrame = currentSprite.frames[currentIdx];
+
+      if (!currentFrame) {
+        // Frame was deleted, reset to 0
+        dispatch({ type: 'SET_CURRENT_FRAME', index: 0 });
+        lastTimeRef.current = timestamp;
+        animationRef.current = requestAnimationFrame(animate);
+        return;
+      }
+
       const elapsed = timestamp - lastTimeRef.current;
 
       if (elapsed >= currentFrame.duration) {
-        const nextIndex = (currentFrameIndex + 1) % sprite.frames.length;
+        const nextIndex = (currentIdx + 1) % currentSprite.frames.length;
         dispatch({ type: 'SET_CURRENT_FRAME', index: nextIndex });
         lastTimeRef.current = timestamp;
       }
@@ -39,16 +68,40 @@ export function AnimationTimeline() {
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
       }
     };
-  }, [isPlaying, sprite, currentFrameIndex, dispatch]);
+  }, [isPlaying, dispatch]);
 
-  // Reset timer when stopping
+  // Keyboard shortcuts for copy/paste frames
   useEffect(() => {
-    if (!isPlaying) {
-      lastTimeRef.current = 0;
-    }
-  }, [isPlaying]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Cmd/Ctrl + C to copy frame
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && !e.shiftKey) {
+        // Don't prevent default to allow normal text copy
+        // Only copy frame if we have a sprite
+        if (sprite) {
+          dispatch({ type: 'COPY_FRAME' });
+        }
+      }
+
+      // Cmd/Ctrl + V to paste frame
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v' && !e.shiftKey) {
+        if (sprite && copiedFrame) {
+          e.preventDefault();
+          dispatch({ type: 'PASTE_FRAME' });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dispatch, sprite, copiedFrame]);
 
   const handleAddFrame = () => {
     dispatch({ type: 'ADD_FRAME' });
@@ -147,14 +200,14 @@ export function AnimationTimeline() {
       </div>
 
       {/* Frame thumbnails */}
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <div className="flex gap-2 overflow-x-auto py-2 px-1">
         {sprite.frames.map((frame, index) => (
           <div
             key={frame.id}
-            className={`flex-shrink-0 cursor-pointer rounded transition-all ${
+            className={`flex-shrink-0 cursor-pointer rounded overflow-hidden transition-all ${
               index === currentFrameIndex
-                ? 'ring-2 ring-editor-highlight scale-105'
-                : 'hover:ring-1 hover:ring-editor-accent'
+                ? 'ring-2 ring-editor-highlight shadow-[0_0_12px_rgba(233,69,96,0.6)]'
+                : 'ring-1 ring-editor-accent/50 hover:ring-editor-accent'
             }`}
             onClick={() => handleSelectFrame(index)}
           >
@@ -162,7 +215,7 @@ export function AnimationTimeline() {
               width={64}
               height={64}
               ref={canvas => renderFrameThumbnail(index, canvas)}
-              className="rounded-t"
+              className="block"
               style={{ imageRendering: 'pixelated' }}
             />
             <div className="bg-editor-accent/50 p-1 rounded-b flex items-center justify-between">
@@ -218,6 +271,14 @@ export function AnimationTimeline() {
           1000 / (sprite.frames.reduce((sum, f) => sum + f.duration, 0) / sprite.frames.length)
         )}{' '}
         FPS avg
+        {copiedFrame && (
+          <span className="ml-2 text-editor-highlight">• Frame copied</span>
+        )}
+      </div>
+
+      {/* Keyboard shortcuts hint */}
+      <div className="text-xs text-gray-600 mt-1">
+        Cmd/Ctrl+C to copy • Cmd/Ctrl+V to paste
       </div>
     </div>
   );

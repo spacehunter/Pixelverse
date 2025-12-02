@@ -1,33 +1,27 @@
 import { useState } from 'react';
 import { useEditor } from '../store/EditorContext';
-import { aiService } from '../services/aiService';
-import type { CanvasSize, Color } from '../types';
-import { DEFAULT_PALETTES } from '../types';
+import { aiService, RD_FAST_STYLES, RD_PLUS_STYLES, type ReplicateModel } from '../services/aiService';
+import type { CanvasSize } from '../types';
 
 const SPRITE_SUGGESTIONS = [
-  'tree',
-  'character',
-  'enemy slime',
-  'cloud',
-  'heart',
-  'coin',
-  'sword',
-  'potion',
-  'star',
-  'house',
-  'player hero',
-  'zombie monster',
+  'a cute slime monster',
+  'pixel art sword',
   'treasure chest',
-  'flower',
-  'rock',
-  'bush',
+  'magic potion bottle',
+  'fantasy tree',
+  'knight character',
+  'dragon',
+  'heart icon',
+  'gold coin',
+  'castle',
+  'mushroom',
+  'crystal gem',
 ];
 
-const STYLE_PRESETS = [
-  { id: 'retro', name: 'Retro 8-bit', description: 'Classic NES-style sprites' },
-  { id: 'modern', name: 'Modern Pixel', description: 'Clean, detailed pixel art' },
-  { id: 'minimalist', name: 'Minimalist', description: 'Simple, iconic shapes' },
-];
+const MODEL_INFO: Record<ReplicateModel, { name: string; description: string }> = {
+  'rd-fast': { name: 'RD Fast', description: 'Quick generation, 15 styles' },
+  'rd-plus': { name: 'RD Plus', description: 'Higher quality, 19 styles' },
+};
 
 export function AIGenerationPanel() {
   const { state, dispatch, createSprite } = useEditor();
@@ -35,11 +29,23 @@ export function AIGenerationPanel() {
 
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedSize, setSelectedSize] = useState<CanvasSize>(16);
-  const [selectedStyle, setSelectedStyle] = useState('retro');
-  const [usePalette, setUsePalette] = useState(true);
-  const [selectedPaletteId, setSelectedPaletteId] = useState('nes');
+  const [selectedSize, setSelectedSize] = useState<CanvasSize>(32);
+  const [selectedModel, setSelectedModel] = useState<ReplicateModel>('rd-fast');
+  const [selectedStyle, setSelectedStyle] = useState('default');
+  const [removeBackground, setRemoveBackground] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+
+  const availableStyles = selectedModel === 'rd-fast' ? RD_FAST_STYLES : RD_PLUS_STYLES;
+
+  // Reset style when model changes if current style isn't available
+  const handleModelChange = (model: ReplicateModel) => {
+    setSelectedModel(model);
+    const newStyles = model === 'rd-fast' ? RD_FAST_STYLES : RD_PLUS_STYLES;
+    if (!newStyles.includes(selectedStyle as never)) {
+      setSelectedStyle('default');
+    }
+  };
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -48,32 +54,31 @@ export function AIGenerationPanel() {
     }
 
     setError(null);
+    setGeneratedImageUrl(null);
     setIsGenerating(true);
 
     try {
-      // Create sprite if none exists
+      // Create sprite if none exists or size changed
       if (!sprite || sprite.width !== selectedSize) {
         createSprite(selectedSize, selectedSize, prompt.substring(0, 20));
       }
 
-      // Get palette colors if selected
-      let colorPalette: Color[] | undefined;
-      if (usePalette) {
-        const palette = DEFAULT_PALETTES.find(p => p.id === selectedPaletteId);
-        colorPalette = palette?.colors;
-      }
-
-      // Generate using AI service
+      // Generate using Replicate AI service
       const result = await aiService.generateSprite({
         prompt,
         size: selectedSize,
-        style: selectedStyle as 'retro' | 'modern' | 'minimalist',
-        colorPalette,
+        model: selectedModel,
+        style: selectedStyle,
+        removeBackground,
       });
 
       if (!result.success) {
         setError(result.error || 'Generation failed');
         return;
+      }
+
+      if (result.imageUrl) {
+        setGeneratedImageUrl(result.imageUrl);
       }
 
       // Apply generated pixels to current layer
@@ -102,16 +107,15 @@ export function AIGenerationPanel() {
     setPrompt(suggestion);
   };
 
-  const handleQuickGenerate = async (suggestion: string) => {
-    setPrompt(suggestion);
-    // Wait for state update then generate
-    setTimeout(() => {
-      handleGenerate();
-    }, 100);
+  const formatStyleName = (style: string) => {
+    return style
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
   };
 
   return (
-    <div className="panel p-3 flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <span className="text-lg">✨</span>
         <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
@@ -127,8 +131,8 @@ export function AIGenerationPanel() {
         <textarea
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder="e.g., 'a cute green slime enemy' or 'pixel art tree'"
-          className="w-full bg-editor-accent/50 text-white text-sm p-2 rounded resize-none h-20"
+          placeholder="e.g., 'a cute green slime monster' or 'pixel art magic sword'"
+          className="w-full bg-editor-accent/50 text-white text-sm p-2 rounded resize-none h-20 focus:outline-none focus:ring-1 focus:ring-editor-highlight"
           disabled={isGenerating}
         />
       </div>
@@ -137,7 +141,7 @@ export function AIGenerationPanel() {
       <div>
         <label className="text-xs text-gray-400 block mb-1">Quick ideas</label>
         <div className="flex flex-wrap gap-1">
-          {SPRITE_SUGGESTIONS.slice(0, 8).map(suggestion => (
+          {SPRITE_SUGGESTIONS.slice(0, 6).map(suggestion => (
             <button
               key={suggestion}
               onClick={() => handleSuggestionClick(suggestion)}
@@ -150,11 +154,50 @@ export function AIGenerationPanel() {
         </div>
       </div>
 
+      {/* Model Selection */}
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">Model</label>
+        <div className="flex gap-1">
+          {(Object.keys(MODEL_INFO) as ReplicateModel[]).map(model => (
+            <button
+              key={model}
+              onClick={() => handleModelChange(model)}
+              className={`flex-1 text-xs py-2 rounded transition-colors ${
+                selectedModel === model
+                  ? 'bg-editor-highlight text-white'
+                  : 'bg-editor-accent/30 hover:bg-editor-accent/50'
+              }`}
+              disabled={isGenerating}
+              title={MODEL_INFO[model].description}
+            >
+              {MODEL_INFO[model].name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Style Selection */}
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">Style</label>
+        <select
+          value={selectedStyle}
+          onChange={e => setSelectedStyle(e.target.value)}
+          className="w-full bg-editor-accent text-white text-sm p-2 rounded focus:outline-none focus:ring-1 focus:ring-editor-highlight"
+          disabled={isGenerating}
+        >
+          {availableStyles.map(style => (
+            <option key={style} value={style}>
+              {formatStyleName(style)}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Size Selection */}
       <div>
         <label className="text-xs text-gray-400 block mb-1">Sprite Size</label>
         <div className="flex gap-1">
-          {([8, 16, 32, 64] as CanvasSize[]).map(size => (
+          {([16, 32, 64, 128] as CanvasSize[]).map(size => (
             <button
               key={size}
               onClick={() => setSelectedSize(size)}
@@ -171,52 +214,20 @@ export function AIGenerationPanel() {
         </div>
       </div>
 
-      {/* Style Selection */}
-      <div>
-        <label className="text-xs text-gray-400 block mb-1">Style</label>
-        <select
-          value={selectedStyle}
-          onChange={e => setSelectedStyle(e.target.value)}
-          className="w-full bg-editor-accent text-white text-sm p-2 rounded"
-          disabled={isGenerating}
-        >
-          {STYLE_PRESETS.map(style => (
-            <option key={style.id} value={style.id}>
-              {style.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Palette Option */}
+      {/* Options */}
       <div className="flex items-center gap-2">
         <input
           type="checkbox"
-          id="usePalette"
-          checked={usePalette}
-          onChange={e => setUsePalette(e.target.checked)}
+          id="removeBackground"
+          checked={removeBackground}
+          onChange={e => setRemoveBackground(e.target.checked)}
           className="accent-editor-highlight"
           disabled={isGenerating}
         />
-        <label htmlFor="usePalette" className="text-xs text-gray-400">
-          Use color palette
+        <label htmlFor="removeBackground" className="text-xs text-gray-400">
+          Remove background (transparent)
         </label>
       </div>
-
-      {usePalette && (
-        <select
-          value={selectedPaletteId}
-          onChange={e => setSelectedPaletteId(e.target.value)}
-          className="w-full bg-editor-accent text-white text-sm p-2 rounded"
-          disabled={isGenerating}
-        >
-          {DEFAULT_PALETTES.map(palette => (
-            <option key={palette.id} value={palette.id}>
-              {palette.name}
-            </option>
-          ))}
-        </select>
-      )}
 
       {/* Error Display */}
       {error && (
@@ -229,8 +240,10 @@ export function AIGenerationPanel() {
       <button
         onClick={handleGenerate}
         disabled={isGenerating || !prompt.trim()}
-        className={`btn-primary w-full flex items-center justify-center gap-2 ${
-          isGenerating ? 'opacity-50 cursor-wait' : ''
+        className={`w-full py-2 px-4 rounded font-medium transition-colors flex items-center justify-center gap-2 ${
+          isGenerating || !prompt.trim()
+            ? 'bg-editor-accent/50 text-gray-500 cursor-not-allowed'
+            : 'bg-editor-highlight hover:bg-editor-highlight/80 text-white'
         }`}
       >
         {isGenerating ? (
@@ -246,30 +259,29 @@ export function AIGenerationPanel() {
         )}
       </button>
 
-      {/* Quick Generate Buttons */}
-      <div className="border-t border-editor-accent/30 pt-3">
-        <label className="text-xs text-gray-400 block mb-2">One-click generate</label>
-        <div className="grid grid-cols-2 gap-1">
-          {['tree', 'character', 'enemy slime', 'heart'].map(item => (
-            <button
-              key={item}
-              onClick={() => handleQuickGenerate(item)}
-              disabled={isGenerating}
-              className="text-xs py-2 bg-editor-accent/30 rounded hover:bg-editor-highlight/50 transition-colors capitalize"
-            >
-              {item}
-            </button>
-          ))}
+      {/* Generated Image Preview */}
+      {generatedImageUrl && (
+        <div className="border-t border-editor-accent/30 pt-3">
+          <label className="text-xs text-gray-400 block mb-2">Generated Result</label>
+          <div className="bg-editor-accent/30 rounded p-2 flex justify-center">
+            <img
+              src={generatedImageUrl}
+              alt="Generated sprite"
+              className="max-w-full h-auto"
+              style={{ imageRendering: 'pixelated' }}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tips */}
       <div className="text-xs text-gray-500 border-t border-editor-accent/30 pt-3">
         <p className="mb-1">💡 Tips:</p>
         <ul className="list-disc list-inside space-y-1">
-          <li>Be specific: "red dragon" vs just "dragon"</li>
-          <li>Mention style: "cute", "scary", "cartoon"</li>
-          <li>8x8 for icons, 16x16 for characters</li>
+          <li>Be descriptive: "red dragon breathing fire"</li>
+          <li>RD Fast is quicker, RD Plus has better quality</li>
+          <li>Try different styles for varied results</li>
+          <li>32x32 or 64x64 work best for characters</li>
         </ul>
       </div>
     </div>

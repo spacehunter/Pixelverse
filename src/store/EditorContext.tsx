@@ -52,6 +52,7 @@ interface EditorState {
   brushSize: number;
   history: HistoryEntry[];
   historyIndex: number;
+  copiedFrame: Frame | null;
 }
 
 interface HistoryEntry {
@@ -87,21 +88,27 @@ type EditorAction =
   | { type: 'UNDO' }
   | { type: 'REDO' }
   | { type: 'LOAD_SPRITE'; sprite: Sprite }
-  | { type: 'SET_PIXELS_BATCH'; pixels: Array<{ x: number; y: number; color: Color }> };
+  | { type: 'SET_PIXELS_BATCH'; pixels: Array<{ x: number; y: number; color: Color }> }
+  | { type: 'COPY_FRAME' }
+  | { type: 'PASTE_FRAME' };
+
+// Create default sprite on startup
+const defaultSprite = createNewSprite(16, 16, 'Untitled');
 
 const initialState: EditorState = {
-  sprite: null,
+  sprite: defaultSprite,
   currentTool: 'pencil',
   primaryColor: { r: 0, g: 0, b: 0, a: 255 },
   secondaryColor: { r: 255, g: 255, b: 255, a: 255 },
   currentFrameIndex: 0,
   currentLayerIndex: 0,
-  zoom: 10,
+  zoom: 16,
   showGrid: true,
   isPlaying: false,
   brushSize: 1,
-  history: [],
-  historyIndex: -1,
+  history: [{ sprite: cloneSprite(defaultSprite), timestamp: Date.now() }],
+  historyIndex: 0,
+  copiedFrame: null,
 };
 
 // Deep clone a sprite (handling Maps)
@@ -201,7 +208,7 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, secondaryColor: action.color };
 
     case 'SET_ZOOM':
-      return { ...state, zoom: Math.max(1, Math.min(50, action.zoom)) };
+      return { ...state, zoom: Math.max(1, Math.min(100, action.zoom)) };
 
     case 'TOGGLE_GRID':
       return { ...state, showGrid: !state.showGrid };
@@ -430,6 +437,51 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
         currentLayerIndex: 0,
         history: [{ sprite: cloneSprite(action.sprite), timestamp: Date.now() }],
         historyIndex: 0,
+      };
+    }
+
+    case 'COPY_FRAME': {
+      if (!state.sprite) return state;
+      const frameToCopy = state.sprite.frames[state.currentFrameIndex];
+      // Deep clone the frame
+      const copiedFrame: Frame = {
+        id: frameToCopy.id,
+        duration: frameToCopy.duration,
+        layers: frameToCopy.layers.map(layer => ({
+          ...layer,
+          pixels: new Map(layer.pixels),
+        })),
+      };
+      return { ...state, copiedFrame };
+    }
+
+    case 'PASTE_FRAME': {
+      if (!state.sprite || !state.copiedFrame) return state;
+      const sprite = cloneSprite(state.sprite);
+      // Create a new frame from the copied frame with new IDs
+      const newFrame: Frame = {
+        id: generateId(),
+        duration: state.copiedFrame.duration,
+        layers: state.copiedFrame.layers.map(layer => ({
+          ...layer,
+          id: generateId(),
+          pixels: new Map(layer.pixels),
+        })),
+      };
+      // Insert after current frame
+      sprite.frames.splice(state.currentFrameIndex + 1, 0, newFrame);
+
+      // Add to history
+      const newHistory = state.history.slice(0, state.historyIndex + 1);
+      newHistory.push({ sprite: cloneSprite(sprite), timestamp: Date.now() });
+      if (newHistory.length > 50) newHistory.shift();
+
+      return {
+        ...state,
+        sprite,
+        currentFrameIndex: state.currentFrameIndex + 1,
+        history: newHistory,
+        historyIndex: newHistory.length - 1,
       };
     }
 

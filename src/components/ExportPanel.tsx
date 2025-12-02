@@ -1,16 +1,78 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useEditor } from '../store/EditorContext';
+import type { Sprite, Color } from '../types';
 
 type ExportFormat = 'png' | 'spritesheet' | 'gif';
 
+// Convert sprite to JSON-serializable format (Maps to arrays)
+function spriteToJSON(sprite: Sprite): object {
+  return {
+    ...sprite,
+    frames: sprite.frames.map(frame => ({
+      ...frame,
+      layers: frame.layers.map(layer => ({
+        ...layer,
+        pixels: Array.from(layer.pixels.entries()),
+      })),
+    })),
+  };
+}
+
+// Convert JSON back to sprite (arrays to Maps)
+function jsonToSprite(json: ReturnType<typeof spriteToJSON>): Sprite {
+  const data = json as {
+    id: string;
+    name: string;
+    width: number;
+    height: number;
+    frames: Array<{
+      id: string;
+      duration: number;
+      layers: Array<{
+        id: string;
+        name: string;
+        visible: boolean;
+        locked: boolean;
+        opacity: number;
+        pixels: Array<[string, Color]>;
+      }>;
+    }>;
+    createdAt: string;
+    updatedAt: string;
+  };
+
+  return {
+    ...data,
+    width: data.width as Sprite['width'],
+    height: data.height as Sprite['height'],
+    frames: data.frames.map(frame => ({
+      ...frame,
+      layers: frame.layers.map(layer => ({
+        ...layer,
+        pixels: new Map(layer.pixels),
+      })),
+    })),
+    createdAt: new Date(data.createdAt),
+    updatedAt: new Date(data.updatedAt),
+  };
+}
+
 export function ExportPanel() {
-  const { state } = useEditor();
+  const { state, dispatch } = useEditor();
   const { sprite } = state;
 
+  const [fileName, setFileName] = useState('');
   const [exportScale, setExportScale] = useState(1);
   const [exportFormat, setExportFormat] = useState<ExportFormat>('png');
   const [includeTransparency, setIncludeTransparency] = useState(true);
   const [spritesheetColumns, setSpritesheetColumns] = useState(4);
+
+  // Update filename when sprite name changes
+  useEffect(() => {
+    if (sprite?.name) {
+      setFileName(sprite.name);
+    }
+  }, [sprite?.name]);
 
   // Render sprite to canvas
   const renderSpriteToCanvas = useCallback(
@@ -53,11 +115,12 @@ export function ExportPanel() {
     const canvas = renderSpriteToCanvas(state.currentFrameIndex, exportScale);
     if (!canvas) return;
 
+    const name = fileName.trim() || 'sprite';
     const link = document.createElement('a');
-    link.download = `${sprite?.name || 'sprite'}_frame${state.currentFrameIndex + 1}.png`;
+    link.download = `${name}_frame${state.currentFrameIndex + 1}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
-  }, [renderSpriteToCanvas, exportScale, sprite, state.currentFrameIndex]);
+  }, [renderSpriteToCanvas, exportScale, fileName, state.currentFrameIndex]);
 
   // Export all frames as sprite sheet
   const exportSpriteSheet = useCallback(() => {
@@ -93,11 +156,12 @@ export function ExportPanel() {
       }
     }
 
+    const name = fileName.trim() || 'spritesheet';
     const link = document.createElement('a');
-    link.download = `${sprite.name || 'spritesheet'}.png`;
+    link.download = `${name}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
-  }, [sprite, renderSpriteToCanvas, exportScale, spritesheetColumns, includeTransparency]);
+  }, [sprite, renderSpriteToCanvas, exportScale, spritesheetColumns, includeTransparency, fileName]);
 
   // Export as animated GIF (simplified version)
   const exportGIF = useCallback(async () => {
@@ -144,6 +208,75 @@ export function ExportPanel() {
     return canvas?.toDataURL('image/png') || '';
   }, [renderSpriteToCanvas, state.currentFrameIndex, exportScale]);
 
+  // Save project as JSON file
+  const saveProject = useCallback((skipPrompt = false) => {
+    if (!sprite) return;
+
+    let name = fileName.trim() || sprite.name || 'project';
+
+    if (!skipPrompt) {
+      const promptedName = prompt('Save project as:', name);
+      if (promptedName === null) return; // User cancelled
+      name = promptedName.trim() || name;
+      setFileName(name);
+    }
+
+    const data = spriteToJSON(sprite);
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.download = `${name}.pixelverse`;
+    link.href = url;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }, [sprite, fileName]);
+
+  // Load project from JSON file
+  const loadProject = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pixelverse,.json';
+
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const json = JSON.parse(event.target?.result as string);
+          const loadedSprite = jsonToSprite(json);
+          dispatch({ type: 'LOAD_SPRITE', sprite: loadedSprite });
+          setFileName(loadedSprite.name);
+        } catch (err) {
+          console.error('Failed to load project:', err);
+          alert('Failed to load project. Make sure it\'s a valid .pixelverse file.');
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    input.click();
+  }, [dispatch]);
+
+  // Keyboard shortcut for save (Cmd/Ctrl + S)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (sprite) {
+          saveProject(false); // Show prompt
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sprite, saveProject]);
+
   if (!sprite) {
     return (
       <div className="panel p-3">
@@ -156,10 +289,41 @@ export function ExportPanel() {
   }
 
   return (
-    <div className="panel p-3 flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-        Export
+        Save & Export
       </h3>
+
+      {/* Filename */}
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">Filename</label>
+        <input
+          type="text"
+          value={fileName}
+          onChange={e => setFileName(e.target.value)}
+          placeholder="Enter filename..."
+          className="w-full bg-editor-accent/50 text-white text-sm p-2 rounded focus:outline-none focus:ring-1 focus:ring-editor-highlight"
+        />
+      </div>
+
+      {/* Save/Load Project */}
+      <div className="flex gap-2">
+        <button onClick={() => saveProject(false)} className="flex-1 btn-primary text-xs py-2">
+          Save Project
+        </button>
+        <button onClick={loadProject} className="flex-1 btn-secondary text-xs py-2">
+          Load Project
+        </button>
+      </div>
+      <div className="text-xs text-gray-500 -mt-1">
+        Saves all {sprite.frames.length} frame{sprite.frames.length !== 1 ? 's' : ''} & layers • Cmd/Ctrl+S
+      </div>
+
+      <div className="border-t border-editor-accent/30 pt-3">
+        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+          Export Image
+        </h4>
+      </div>
 
       {/* Preview */}
       <div className="bg-editor-bg rounded p-2 flex items-center justify-center">
@@ -257,13 +421,18 @@ export function ExportPanel() {
 
       {/* Export Info */}
       <div className="text-xs text-gray-500 border-t border-editor-accent/30 pt-3">
-        <p>
-          {exportFormat === 'png' && `Exporting frame ${state.currentFrameIndex + 1}`}
+        <p className="font-medium text-gray-400 mb-1">
+          {exportFormat === 'png' && `Exports frame ${state.currentFrameIndex + 1} only`}
           {exportFormat === 'spritesheet' &&
-            `${sprite.frames.length} frames in ${spritesheetColumns}x${Math.ceil(
+            `Exports ALL ${sprite.frames.length} frames in ${spritesheetColumns}x${Math.ceil(
               sprite.frames.length / spritesheetColumns
             )} grid`}
-          {exportFormat === 'gif' && `Animated GIF with ${sprite.frames.length} frames`}
+          {exportFormat === 'gif' && `Exports ALL ${sprite.frames.length} frames as animation`}
+        </p>
+        <p className="text-gray-600">
+          {exportFormat === 'png' && 'Use spritesheet to export all frames'}
+          {exportFormat === 'spritesheet' && 'Good for game engines'}
+          {exportFormat === 'gif' && 'Coming soon - uses spritesheet for now'}
         </p>
       </div>
     </div>

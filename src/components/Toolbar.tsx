@@ -7,6 +7,7 @@ const tools: { id: Tool; name: string; icon: string; shortcut: string }[] = [
   { id: 'eraser', name: 'Eraser', icon: '🧹', shortcut: 'E' },
   { id: 'fill', name: 'Fill', icon: '🪣', shortcut: 'F' },
   { id: 'eyedropper', name: 'Eyedropper', icon: '💧', shortcut: 'I' },
+  { id: 'pan', name: 'Pan', icon: '✋', shortcut: 'H' },
   { id: 'line', name: 'Line', icon: '📏', shortcut: 'L' },
   { id: 'rectangle', name: 'Rectangle', icon: '⬜', shortcut: 'R' },
   { id: 'circle', name: 'Circle', icon: '⭕', shortcut: 'C' },
@@ -112,12 +113,13 @@ export function Toolbar() {
         <label className="text-xs text-gray-400 block mb-2">Zoom: {zoom}x</label>
         <input
           type="range"
-          min="4"
-          max="40"
+          min="1"
+          max="100"
           value={zoom}
           onChange={e => dispatch({ type: 'SET_ZOOM', zoom: parseInt(e.target.value) })}
           className="w-full accent-editor-highlight"
         />
+        <div className="text-xs text-gray-500 mt-1">Cmd/Ctrl + scroll to zoom</div>
       </div>
 
       <div className="border-t border-editor-accent/30 pt-3 flex flex-col gap-2">

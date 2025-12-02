@@ -47,6 +47,7 @@ export type Tool =
   | 'eyedropper'
   | 'select'
   | 'move'
+  | 'pan'
   | 'line'
   | 'rectangle'
   | 'circle';
@@ -70,20 +71,7 @@ export interface HistoryEntry {
   timestamp: number;
 }
 
-// AI Generation types
-export interface AIGenerationRequest {
-  prompt: string;
-  size: CanvasSize;
-  style?: 'retro' | 'modern' | 'minimalist';
-  colorPalette?: Color[];
-  referenceImage?: string; // base64
-}
-
-export interface AIGenerationResponse {
-  success: boolean;
-  pixels?: Pixel[];
-  error?: string;
-}
+// AI Generation types are defined in src/services/aiService.ts
 
 // Palette types
 export interface ColorPalette {

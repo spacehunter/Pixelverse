@@ -8,6 +8,7 @@ export function PixelCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const {
     state,
+    dispatch,
     setPixelsBatch,
     fillArea,
     setPrimaryColor,
@@ -16,6 +17,8 @@ export function PixelCanvas() {
   } = useEditor();
 
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [lastPanPos, setLastPanPos] = useState<{ x: number; y: number } | null>(null);
   const [lastPos, setLastPos] = useState<{ x: number; y: number } | null>(null);
   const [pendingPixels, setPendingPixels] = useState<Array<{ x: number; y: number; color: Color }>>([]);
 
@@ -241,6 +244,14 @@ export function PixelCanvas() {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       e.preventDefault();
+
+      // Handle pan tool
+      if (currentTool === 'pan') {
+        setIsPanning(true);
+        setLastPanPos({ x: e.clientX, y: e.clientY });
+        return;
+      }
+
       const coords = getPixelCoords(e);
       if (!coords) return;
 
@@ -249,11 +260,26 @@ export function PixelCanvas() {
       setPendingPixels([]);
       handleDraw(coords, e.button === 2);
     },
-    [getPixelCoords, handleDraw]
+    [getPixelCoords, handleDraw, currentTool]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
+      // Handle pan tool - move incrementally based on mouse delta
+      if (isPanning && lastPanPos) {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const dx = e.clientX - lastPanPos.x;
+        const dy = e.clientY - lastPanPos.y;
+
+        container.scrollLeft -= dx;
+        container.scrollTop -= dy;
+
+        setLastPanPos({ x: e.clientX, y: e.clientY });
+        return;
+      }
+
       if (!isDrawing) return;
 
       const coords = getPixelCoords(e);
@@ -261,31 +287,64 @@ export function PixelCanvas() {
 
       handleDraw(coords, e.buttons === 2);
     },
-    [isDrawing, getPixelCoords, handleDraw]
+    [isDrawing, isPanning, lastPanPos, getPixelCoords, handleDraw]
   );
 
   const handleMouseUp = useCallback(() => {
+    if (isPanning) {
+      setIsPanning(false);
+      setLastPanPos(null);
+      return;
+    }
+
     if (isDrawing && pendingPixels.length > 0) {
       setPixelsBatch(pendingPixels);
     }
     setIsDrawing(false);
     setLastPos(null);
     setPendingPixels([]);
-  }, [isDrawing, pendingPixels, setPixelsBatch]);
+  }, [isDrawing, isPanning, pendingPixels, setPixelsBatch]);
 
   const handleMouseLeave = useCallback(() => {
+    if (isPanning) {
+      setIsPanning(false);
+      setLastPanPos(null);
+      return;
+    }
+
     if (isDrawing && pendingPixels.length > 0) {
       setPixelsBatch(pendingPixels);
     }
     setIsDrawing(false);
     setLastPos(null);
     setPendingPixels([]);
-  }, [isDrawing, pendingPixels, setPixelsBatch]);
+  }, [isDrawing, isPanning, pendingPixels, setPixelsBatch]);
 
   // Prevent context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
   }, []);
+
+  // Handle Cmd/Ctrl + scroll wheel zoom
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Only zoom if Cmd (Mac) or Ctrl (Windows/Linux) is pressed
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const delta = e.deltaY > 0 ? -5 : 5;
+        const newZoom = Math.max(1, Math.min(100, zoom + delta));
+        dispatch({ type: 'SET_ZOOM', zoom: newZoom });
+      }
+    };
+
+    // Use non-passive listener to allow preventDefault
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [dispatch, zoom, sprite]); // sprite dependency ensures effect runs when container becomes available
 
   // Render pending pixels while drawing
   useEffect(() => {
@@ -320,6 +379,41 @@ export function PixelCanvas() {
     }
   }, [pendingPixels, sprite, zoom]);
 
+  // Render 1:1 preview
+  const previewRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const preview = previewRef.current;
+    const ctx = preview?.getContext('2d');
+    if (!preview || !ctx || !sprite) return;
+
+    preview.width = sprite.width;
+    preview.height = sprite.height;
+
+    // Clear with checkerboard
+    for (let y = 0; y < sprite.height; y++) {
+      for (let x = 0; x < sprite.width; x++) {
+        ctx.fillStyle = (x + y) % 2 === 0 ? '#2a2a3e' : '#3a3a4e';
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+
+    // Draw all visible layers
+    const frame = getCurrentFrame();
+    if (!frame) return;
+
+    for (const layer of frame.layers) {
+      if (!layer.visible) continue;
+      const opacity = layer.opacity / 100;
+
+      layer.pixels.forEach((color, key) => {
+        const [x, y] = key.split(',').map(Number);
+        ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${(color.a / 255) * opacity})`;
+        ctx.fillRect(x, y, 1, 1);
+      });
+    }
+  }, [sprite, state, getCurrentFrame]);
+
   if (!sprite) {
     return (
       <div className="flex items-center justify-center h-full text-gray-400">
@@ -331,7 +425,7 @@ export function PixelCanvas() {
   return (
     <div
       ref={containerRef}
-      className="flex items-center justify-center h-full overflow-auto p-4"
+      className="relative flex items-center justify-center h-full overflow-auto p-4"
     >
       <canvas
         ref={canvasRef}
@@ -340,11 +434,34 @@ export function PixelCanvas() {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
-        className="cursor-crosshair border border-editor-accent/50 shadow-lg"
+        className={`border border-editor-accent/50 shadow-lg ${
+          currentTool === 'pan'
+            ? isPanning ? 'cursor-grabbing' : 'cursor-grab'
+            : 'cursor-crosshair'
+        }`}
         style={{
           imageRendering: 'pixelated',
         }}
       />
+
+      {/* 1:1 Preview in bottom right */}
+      <div className="absolute bottom-4 right-4 bg-editor-panel border border-editor-accent/50 rounded-lg p-2 shadow-lg">
+        <div className="text-xs text-gray-400 mb-1 text-center">1:1 Preview</div>
+        <canvas
+          ref={previewRef}
+          className="border border-editor-accent/30"
+          style={{
+            imageRendering: 'pixelated',
+            minWidth: '64px',
+            minHeight: '64px',
+            width: sprite.width < 64 ? '64px' : `${sprite.width}px`,
+            height: sprite.height < 64 ? '64px' : `${sprite.height}px`,
+          }}
+        />
+        <div className="text-xs text-gray-500 mt-1 text-center">
+          {sprite.width}x{sprite.height}
+        </div>
+      </div>
     </div>
   );
 }
