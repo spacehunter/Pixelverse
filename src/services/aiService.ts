@@ -259,5 +259,8 @@ class AIService {
 // Export singleton instance
 export const aiService = new AIService();
 
-// Configure with API token
-aiService.configure('REMOVED_SECRET');
+// Configure with API token from environment variable
+const apiToken = import.meta.env.VITE_REPLICATE_API_TOKEN;
+if (apiToken) {
+  aiService.configure(apiToken);
+}

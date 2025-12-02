@@ -20,12 +20,18 @@ AI-powered pixel art sprite editor. Create sprites in seconds with Retro Diffusi
 # Install dependencies
 npm install
 
+# Set up environment variables
+cp .env.example .env
+# Edit .env and add your Replicate API token
+
 # Start development server
 npm run dev
 
 # Build for production
 npm run build
 ```
+
+To use AI sprite generation, get your API token from [Replicate](https://replicate.com/account/api-tokens) and add it to `.env`.
 
 ## Keyboard Shortcuts
 
