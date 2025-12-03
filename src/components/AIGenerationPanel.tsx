@@ -1,7 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useEditor } from '../store/EditorContext';
 import { aiService, RD_FAST_STYLES, RD_PLUS_STYLES, type ReplicateModel } from '../services/aiService';
+import { groqService } from '../services/groqService';
 import type { CanvasSize } from '../types';
+
+interface AIGeneratedDetail {
+  label: string;
+  text: string;
+}
 
 const SPRITE_SUGGESTIONS = [
   'a cute slime monster',
@@ -18,16 +24,148 @@ const SPRITE_SUGGESTIONS = [
   'crystal gem',
 ];
 
-// Color palette for quick color additions
-const COLOR_MODIFIERS = [
-  { name: 'red', color: '#ef4444', text: 'red' },
-  { name: 'blue', color: '#3b82f6', text: 'blue' },
-  { name: 'green', color: '#22c55e', text: 'green' },
-  { name: 'purple', color: '#a855f7', text: 'purple' },
-  { name: 'gold', color: '#eab308', text: 'golden' },
-  { name: 'silver', color: '#94a3b8', text: 'silver' },
-  { name: 'black', color: '#1f2937', text: 'dark' },
-  { name: 'white', color: '#f8fafc', text: 'white' },
+// Expanded color families with variations for richer color selection
+interface ColorVariation {
+  name: string;
+  color: string;
+  text: string;
+}
+
+interface ColorFamily {
+  name: string;
+  baseColor: string;
+  variations: ColorVariation[];
+}
+
+const COLOR_FAMILIES: ColorFamily[] = [
+  {
+    name: 'red',
+    baseColor: '#ef4444',
+    variations: [
+      { name: 'red', color: '#ef4444', text: 'red' },
+      { name: 'crimson', color: '#dc143c', text: 'crimson' },
+      { name: 'scarlet', color: '#ff2400', text: 'scarlet' },
+      { name: 'ruby', color: '#e0115f', text: 'ruby red' },
+      { name: 'coral', color: '#ff7f50', text: 'coral' },
+      { name: 'maroon', color: '#800000', text: 'maroon' },
+      { name: 'cherry', color: '#de3163', text: 'cherry red' },
+      { name: 'rose', color: '#ff007f', text: 'rose' },
+      { name: 'burgundy', color: '#722f37', text: 'burgundy' },
+      { name: 'blood red', color: '#8a0303', text: 'blood red' },
+    ],
+  },
+  {
+    name: 'blue',
+    baseColor: '#3b82f6',
+    variations: [
+      { name: 'blue', color: '#3b82f6', text: 'blue' },
+      { name: 'navy', color: '#000080', text: 'navy blue' },
+      { name: 'royal', color: '#4169e1', text: 'royal blue' },
+      { name: 'sky', color: '#87ceeb', text: 'sky blue' },
+      { name: 'cyan', color: '#00ffff', text: 'cyan' },
+      { name: 'teal', color: '#008080', text: 'teal' },
+      { name: 'sapphire', color: '#0f52ba', text: 'sapphire blue' },
+      { name: 'azure', color: '#007fff', text: 'azure' },
+      { name: 'cobalt', color: '#0047ab', text: 'cobalt blue' },
+      { name: 'ice', color: '#a5f2f3', text: 'ice blue' },
+    ],
+  },
+  {
+    name: 'green',
+    baseColor: '#22c55e',
+    variations: [
+      { name: 'green', color: '#22c55e', text: 'green' },
+      { name: 'emerald', color: '#50c878', text: 'emerald green' },
+      { name: 'forest', color: '#228b22', text: 'forest green' },
+      { name: 'lime', color: '#32cd32', text: 'lime green' },
+      { name: 'mint', color: '#98fb98', text: 'mint green' },
+      { name: 'olive', color: '#808000', text: 'olive green' },
+      { name: 'jade', color: '#00a86b', text: 'jade green' },
+      { name: 'sage', color: '#9dc183', text: 'sage green' },
+      { name: 'seafoam', color: '#71eeb8', text: 'seafoam green' },
+      { name: 'hunter', color: '#355e3b', text: 'hunter green' },
+    ],
+  },
+  {
+    name: 'purple',
+    baseColor: '#a855f7',
+    variations: [
+      { name: 'purple', color: '#a855f7', text: 'purple' },
+      { name: 'violet', color: '#8b00ff', text: 'violet' },
+      { name: 'lavender', color: '#e6e6fa', text: 'lavender' },
+      { name: 'plum', color: '#8e4585', text: 'plum' },
+      { name: 'magenta', color: '#ff00ff', text: 'magenta' },
+      { name: 'grape', color: '#6f2da8', text: 'grape purple' },
+      { name: 'amethyst', color: '#9966cc', text: 'amethyst' },
+      { name: 'indigo', color: '#4b0082', text: 'indigo' },
+      { name: 'lilac', color: '#c8a2c8', text: 'lilac' },
+      { name: 'orchid', color: '#da70d6', text: 'orchid' },
+    ],
+  },
+  {
+    name: 'gold',
+    baseColor: '#eab308',
+    variations: [
+      { name: 'gold', color: '#ffd700', text: 'golden' },
+      { name: 'amber', color: '#ffbf00', text: 'amber' },
+      { name: 'mustard', color: '#ffdb58', text: 'mustard yellow' },
+      { name: 'honey', color: '#eb9605', text: 'honey colored' },
+      { name: 'brass', color: '#b5a642', text: 'brass' },
+      { name: 'bronze', color: '#cd7f32', text: 'bronze' },
+      { name: 'copper', color: '#b87333', text: 'copper' },
+      { name: 'ochre', color: '#cc7722', text: 'ochre' },
+      { name: 'saffron', color: '#f4c430', text: 'saffron' },
+      { name: 'canary', color: '#ffef00', text: 'canary yellow' },
+    ],
+  },
+  {
+    name: 'silver',
+    baseColor: '#94a3b8',
+    variations: [
+      { name: 'silver', color: '#c0c0c0', text: 'silver' },
+      { name: 'steel', color: '#71797e', text: 'steel gray' },
+      { name: 'slate', color: '#708090', text: 'slate gray' },
+      { name: 'chrome', color: '#dbe4eb', text: 'chrome' },
+      { name: 'pewter', color: '#8e9196', text: 'pewter' },
+      { name: 'gunmetal', color: '#2a3439', text: 'gunmetal' },
+      { name: 'ash', color: '#b2beb5', text: 'ash gray' },
+      { name: 'charcoal', color: '#36454f', text: 'charcoal' },
+      { name: 'smoke', color: '#848884', text: 'smoke gray' },
+      { name: 'platinum', color: '#e5e4e2', text: 'platinum' },
+    ],
+  },
+  {
+    name: 'black',
+    baseColor: '#1f2937',
+    variations: [
+      { name: 'black', color: '#000000', text: 'black' },
+      { name: 'dark', color: '#1f2937', text: 'dark' },
+      { name: 'shadow', color: '#0a0a0a', text: 'shadowy' },
+      { name: 'obsidian', color: '#0b1215', text: 'obsidian black' },
+      { name: 'jet', color: '#0a0a0a', text: 'jet black' },
+      { name: 'midnight', color: '#191970', text: 'midnight' },
+      { name: 'onyx', color: '#353839', text: 'onyx black' },
+      { name: 'ebony', color: '#282c34', text: 'ebony' },
+      { name: 'raven', color: '#0d0d0d', text: 'raven black' },
+      { name: 'void', color: '#050505', text: 'void black' },
+    ],
+  },
+  {
+    name: 'white',
+    baseColor: '#f8fafc',
+    variations: [
+      { name: 'white', color: '#ffffff', text: 'white' },
+      { name: 'ivory', color: '#fffff0', text: 'ivory' },
+      { name: 'cream', color: '#fffdd0', text: 'cream colored' },
+      { name: 'pearl', color: '#fdeef4', text: 'pearl white' },
+      { name: 'snow', color: '#fffafa', text: 'snow white' },
+      { name: 'ghost', color: '#f8f8ff', text: 'ghostly white' },
+      { name: 'pale', color: '#faf0e6', text: 'pale' },
+      { name: 'frost', color: '#e8e8e8', text: 'frost white' },
+      { name: 'bone', color: '#e3dac9', text: 'bone white' },
+      { name: 'cloud', color: '#f0f0f0', text: 'cloud white' },
+    ],
+  },
 ];
 
 // Context-aware keyword patterns and their associated modifiers
@@ -232,7 +370,15 @@ const MODEL_INFO: Record<ReplicateModel, { name: string; description: string }> 
 
 export function AIGenerationPanel() {
   const { state, dispatch, createSprite } = useEditor();
-  const { sprite } = state;
+  const { sprite, currentFrameIndex } = state;
+
+  // Check if the current frame is blank (all layers have no pixels)
+  const isCurrentFrameBlank = (): boolean => {
+    if (!sprite) return true;
+    const currentFrame = sprite.frames[currentFrameIndex];
+    if (!currentFrame) return true;
+    return currentFrame.layers.every(layer => layer.pixels.size === 0);
+  };
 
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -243,8 +389,44 @@ export function AIGenerationPanel() {
   const [error, setError] = useState<string | null>(null);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [showEnhancer, setShowEnhancer] = useState(true);
+  const [expandedColorFamily, setExpandedColorFamily] = useState<string | null>(null);
+  const [isGeneratingIdeas, setIsGeneratingIdeas] = useState(false);
+  const [aiGeneratedIdeas, setAiGeneratedIdeas] = useState<string[] | null>(null);
+  const [aiGeneratedDetails, setAiGeneratedDetails] = useState<AIGeneratedDetail[] | null>(null);
+  const [ideasError, setIdeasError] = useState<string | null>(null);
+
+  const colorPopupRef = useRef<HTMLDivElement>(null);
+  const colorButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const availableStyles = selectedModel === 'rd-fast' ? RD_FAST_STYLES : RD_PLUS_STYLES;
+
+  // Handle click outside to close color popup
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        expandedColorFamily &&
+        colorPopupRef.current &&
+        !colorPopupRef.current.contains(event.target as Node) &&
+        !Array.from(colorButtonRefs.current.values()).some(btn => btn?.contains(event.target as Node))
+      ) {
+        setExpandedColorFamily(null);
+      }
+    };
+
+    const handleEscapeKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && expandedColorFamily) {
+        setExpandedColorFamily(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscapeKey);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, [expandedColorFamily]);
 
   // Detect context from prompt and get relevant modifiers
   const contextModifiers = useMemo(() => {
@@ -276,14 +458,6 @@ export function AIGenerationPanel() {
     return matchedModifiers.slice(0, 6);
   }, [prompt]);
 
-  // Check which colors are already mentioned in the prompt
-  const availableColors = useMemo(() => {
-    const lowerPrompt = prompt.toLowerCase();
-    return COLOR_MODIFIERS.filter(
-      color => !lowerPrompt.includes(color.text.toLowerCase())
-    );
-  }, [prompt]);
-
   // Reset style when model changes if current style isn't available
   const handleModelChange = (model: ReplicateModel) => {
     setSelectedModel(model);
@@ -307,6 +481,9 @@ export function AIGenerationPanel() {
       // Create sprite if none exists or size changed
       if (!sprite || sprite.width !== selectedSize) {
         createSprite(selectedSize, selectedSize, prompt.substring(0, 20));
+      } else if (!isCurrentFrameBlank()) {
+        // If current frame has content, add a new frame to avoid overwriting
+        dispatch({ type: 'ADD_FRAME' });
       }
 
       // Generate using Replicate AI service
@@ -329,7 +506,7 @@ export function AIGenerationPanel() {
 
       // Apply generated pixels to current layer
       if (result.pixels && result.pixels.length > 0) {
-        // Clear current layer first
+        // Clear current layer first (in case there's any residual data)
         dispatch({ type: 'CLEAR_CANVAS' });
 
         // Set the generated pixels
@@ -364,6 +541,11 @@ export function AIGenerationPanel() {
     }
   };
 
+  // Toggle color family expansion
+  const handleColorFamilyClick = (familyName: string) => {
+    setExpandedColorFamily(prev => (prev === familyName ? null : familyName));
+  };
+
   // Add color to the prompt
   const handleColorClick = (colorText: string) => {
     const trimmedPrompt = prompt.trim();
@@ -376,6 +558,43 @@ export function AIGenerationPanel() {
       }
     } else {
       setPrompt(colorText);
+    }
+    // Close the popup after selecting a color
+    setExpandedColorFamily(null);
+  };
+
+  // Get expanded family data
+  const expandedFamily = expandedColorFamily
+    ? COLOR_FAMILIES.find(f => f.name === expandedColorFamily)
+    : null;
+
+  // Filter out color variations that are already in the prompt
+  const getAvailableVariations = (family: ColorFamily) => {
+    const lowerPrompt = prompt.toLowerCase();
+    return family.variations.filter(
+      v => !lowerPrompt.includes(v.text.toLowerCase().split(' ')[0])
+    );
+  };
+
+  // Generate new ideas and details using Groq AI
+  const handleGenerateNewIdeas = async () => {
+    if (!groqService.isConfigured()) {
+      setIdeasError('Groq API key not configured. Add VITE_GROQ_API_KEY to your .env file.');
+      return;
+    }
+
+    setIsGeneratingIdeas(true);
+    setIdeasError(null);
+
+    try {
+      const { ideas, details } = await groqService.generateIdeasAndDetails(selectedStyle);
+      setAiGeneratedIdeas(ideas);
+      setAiGeneratedDetails(details);
+    } catch (err) {
+      console.error('Failed to generate ideas:', err);
+      setIdeasError(err instanceof Error ? err.message : 'Failed to generate ideas');
+    } finally {
+      setIsGeneratingIdeas(false);
     }
   };
 
@@ -410,7 +629,7 @@ export function AIGenerationPanel() {
       </div>
 
       {/* Prompt Enhancer - Color & Modifier Suggestions */}
-      <div className="border border-editor-accent/40 rounded overflow-hidden">
+      <div className="border border-editor-accent/40 rounded">
         <button
           onClick={() => setShowEnhancer(!showEnhancer)}
           className="w-full flex items-center justify-between px-2 py-1.5 bg-editor-accent/20 hover:bg-editor-accent/30 transition-colors text-xs"
@@ -432,36 +651,200 @@ export function AIGenerationPanel() {
 
         {showEnhancer && (
           <div className="p-2 space-y-2 bg-editor-accent/10">
-            {/* Color Palette */}
+            {/* Generate New Ideas Button */}
+            <button
+              onClick={handleGenerateNewIdeas}
+              disabled={isGenerating || isGeneratingIdeas}
+              className={`w-full py-1.5 px-3 rounded text-[11px] font-medium transition-all flex items-center justify-center gap-2 ${
+                isGeneratingIdeas
+                  ? 'bg-editor-accent/50 text-gray-400 cursor-wait'
+                  : 'bg-gradient-to-r from-purple-600/80 to-pink-600/80 hover:from-purple-500 hover:to-pink-500 text-white'
+              }`}
+            >
+              {isGeneratingIdeas ? (
+                <>
+                  <span className="animate-spin">⚙️</span>
+                  Generating ideas...
+                </>
+              ) : (
+                <>
+                  <span>✨</span>
+                  Generate New Ideas
+                </>
+              )}
+            </button>
+
+            {/* Ideas Error */}
+            {ideasError && (
+              <div className="text-[10px] text-red-400 bg-red-900/20 px-2 py-1 rounded">
+                {ideasError}
+              </div>
+            )}
+
+            {/* Quick Ideas */}
             <div>
-              <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
-                Add Color
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider">
+                  Quick Ideas
+                </label>
+                {aiGeneratedIdeas && (
+                  <span className="text-[9px] text-purple-400 flex items-center gap-1">
+                    <span>✨</span> AI Generated
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-1">
-                {availableColors.map(color => (
+                {(aiGeneratedIdeas || SPRITE_SUGGESTIONS.slice(0, 6)).map((suggestion, idx) => (
                   <button
-                    key={color.name}
-                    onClick={() => handleColorClick(color.text)}
-                    className="group relative w-6 h-6 rounded border border-editor-accent/50 hover:border-white/50 hover:scale-110 transition-all"
-                    style={{ backgroundColor: color.color }}
-                    disabled={isGenerating}
-                    title={`Add "${color.text}" to prompt`}
+                    key={`${suggestion}-${idx}`}
+                    onClick={() => handleSuggestionClick(suggestion)}
+                    className={`text-[11px] px-2 py-1 rounded transition-colors ${
+                      aiGeneratedIdeas
+                        ? 'bg-purple-600/30 hover:bg-purple-500/50 border border-purple-500/30'
+                        : 'bg-editor-accent/40 hover:bg-editor-highlight/50'
+                    }`}
+                    disabled={isGenerating || isGeneratingIdeas}
                   >
-                    <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[9px] text-gray-400 opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
-                      {color.text}
-                    </span>
+                    {suggestion}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Context-Aware Modifiers */}
-            {(contextModifiers.length > 0 || !prompt.trim()) && (
+            {/* Color Palette with Expandable Families */}
+            <div className="relative">
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
+                Add Color <span className="text-gray-600">(click to expand)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {COLOR_FAMILIES.map(family => {
+                  const isExpanded = expandedColorFamily === family.name;
+                  const availableCount = getAvailableVariations(family).length;
+                  return (
+                    <button
+                      key={family.name}
+                      ref={el => {
+                        if (el) colorButtonRefs.current.set(family.name, el);
+                      }}
+                      onClick={() => handleColorFamilyClick(family.name)}
+                      className={`group relative w-7 h-7 rounded-md border-2 transition-all duration-200 ${
+                        isExpanded
+                          ? 'border-white scale-110 ring-2 ring-editor-highlight/50'
+                          : 'border-editor-accent/50 hover:border-white/50 hover:scale-105'
+                      } ${availableCount === 0 ? 'opacity-40' : ''}`}
+                      style={{ backgroundColor: family.baseColor }}
+                      disabled={isGenerating || availableCount === 0}
+                      title={`${family.name} colors (${availableCount} available)`}
+                    >
+                      {/* Expansion indicator */}
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-editor-panel rounded-full flex items-center justify-center text-[8px] transition-opacity ${
+                          isExpanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-70'
+                        }`}
+                      >
+                        {isExpanded ? '−' : '+'}
+                      </span>
+                      {/* Color name tooltip */}
+                      <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[9px] text-gray-400 opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity pointer-events-none">
+                        {family.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Expanded Color Variations Popup */}
+              {expandedFamily && (
+                <div
+                  ref={colorPopupRef}
+                  className="absolute left-0 right-0 mt-3 p-2 bg-editor-panel border border-editor-accent/60 rounded-lg shadow-xl z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+                >
+                  {/* Arrow pointer */}
+                  <div
+                    className="absolute -top-2 w-3 h-3 bg-editor-panel border-l border-t border-editor-accent/60 rotate-45"
+                    style={{
+                      left: `${(COLOR_FAMILIES.findIndex(f => f.name === expandedColorFamily) * 34) + 14}px`,
+                    }}
+                  />
+
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-medium text-gray-300 capitalize flex items-center gap-1.5">
+                      <span
+                        className="w-3 h-3 rounded-sm"
+                        style={{ backgroundColor: expandedFamily.baseColor }}
+                      />
+                      {expandedFamily.name} Shades
+                    </span>
+                    <button
+                      onClick={() => setExpandedColorFamily(null)}
+                      className="text-gray-500 hover:text-white text-xs p-0.5 hover:bg-editor-accent/50 rounded transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Color Variations Grid */}
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {getAvailableVariations(expandedFamily).map(variation => (
+                      <button
+                        key={variation.name}
+                        onClick={() => handleColorClick(variation.text)}
+                        className="group flex flex-col items-center gap-0.5 p-1.5 rounded-md hover:bg-editor-accent/40 transition-colors"
+                        disabled={isGenerating}
+                        title={`Add "${variation.text}" to prompt`}
+                      >
+                        <span
+                          className="w-6 h-6 rounded-md border border-white/20 group-hover:border-white/50 group-hover:scale-110 transition-all shadow-sm"
+                          style={{ backgroundColor: variation.color }}
+                        />
+                        <span className="text-[9px] text-gray-400 group-hover:text-gray-200 text-center leading-tight truncate w-full">
+                          {variation.name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Hint */}
+                  <div className="mt-2 pt-1.5 border-t border-editor-accent/30 text-[9px] text-gray-500 text-center">
+                    Click a shade or press Esc to close
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Add Details - AI Generated or Context-Aware */}
+            {(aiGeneratedDetails || contextModifiers.length > 0 || !prompt.trim()) && (
               <div>
-                <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
-                  {prompt.trim() ? 'Add Details' : 'Start typing to see suggestions'}
-                </label>
-                {contextModifiers.length > 0 && (
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">
+                    {aiGeneratedDetails
+                      ? 'Add Details'
+                      : prompt.trim()
+                        ? 'Add Details'
+                        : 'Start typing to see suggestions'}
+                  </label>
+                  {aiGeneratedDetails && (
+                    <span className="text-[9px] text-purple-400 flex items-center gap-1">
+                      <span>✨</span> AI Generated
+                    </span>
+                  )}
+                </div>
+                {aiGeneratedDetails ? (
+                  <div className="flex flex-wrap gap-1">
+                    {aiGeneratedDetails.map((detail, idx) => (
+                      <button
+                        key={`${detail.label}-${idx}`}
+                        onClick={() => handleModifierClick(detail.text)}
+                        className="flex items-center gap-1 text-[11px] px-2 py-1 bg-purple-600/30 border border-purple-500/30 rounded hover:bg-purple-500/50 transition-colors"
+                        disabled={isGenerating || isGeneratingIdeas}
+                        title={`Add "${detail.text}"`}
+                      >
+                        <span>{detail.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : contextModifiers.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {contextModifiers.map((mod, idx) => (
                       <button
@@ -476,28 +859,11 @@ export function AIGenerationPanel() {
                       </button>
                     ))}
                   </div>
-                )}
+                ) : null}
               </div>
             )}
           </div>
         )}
-      </div>
-
-      {/* Quick Suggestions */}
-      <div>
-        <label className="text-xs text-gray-400 block mb-1">Quick ideas</label>
-        <div className="flex flex-wrap gap-1">
-          {SPRITE_SUGGESTIONS.slice(0, 6).map(suggestion => (
-            <button
-              key={suggestion}
-              onClick={() => handleSuggestionClick(suggestion)}
-              className="text-xs px-2 py-1 bg-editor-accent/30 rounded hover:bg-editor-accent/50 transition-colors"
-              disabled={isGenerating}
-            >
-              {suggestion}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Model Selection */}

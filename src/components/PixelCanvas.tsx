@@ -22,7 +22,19 @@ export function PixelCanvas() {
   const [lastPos, setLastPos] = useState<{ x: number; y: number } | null>(null);
   const [pendingPixels, setPendingPixels] = useState<Array<{ x: number; y: number; color: Color }>>([]);
 
-  const { sprite, zoom, showGrid, currentTool, primaryColor, secondaryColor, brushSize } = state;
+  // Selection state
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null);
+
+  // Floating selection dragging state
+  const [isDraggingFloating, setIsDraggingFloating] = useState(false);
+  const [floatingDragOffset, setFloatingDragOffset] = useState<{ x: number; y: number } | null>(null);
+
+  // Marching ants animation
+  const [marchingAntsOffset, setMarchingAntsOffset] = useState(0);
+
+  const { sprite, zoom, showGrid, currentTool, primaryColor, secondaryColor, brushSize, selection, floatingSelection } = state;
 
   // Render the canvas
   const render = useCallback(() => {
@@ -85,12 +97,147 @@ export function PixelCanvas() {
         ctx.stroke();
       }
     }
-  }, [sprite, zoom, showGrid, getCurrentFrame]);
+
+    // Draw floating selection (pasted content that can be moved)
+    if (floatingSelection) {
+      const { x: fx, y: fy, pixels: floatingPixels } = floatingSelection;
+      floatingPixels.forEach((color, key) => {
+        const [relX, relY] = key.split(',').map(Number);
+        const absX = relX + fx;
+        const absY = relY + fy;
+        if (absX >= 0 && absX < sprite.width && absY >= 0 && absY < sprite.height) {
+          ctx.fillStyle = colorToRgba(color);
+          ctx.fillRect(absX * pixelSize, absY * pixelSize, pixelSize, pixelSize);
+        }
+      });
+
+      // Draw marching ants border around floating selection
+      ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = -marchingAntsOffset;
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        fx * pixelSize + 0.5,
+        fy * pixelSize + 0.5,
+        floatingSelection.width * pixelSize - 1,
+        floatingSelection.height * pixelSize - 1
+      );
+      ctx.strokeStyle = 'black';
+      ctx.lineDashOffset = -marchingAntsOffset + 4;
+      ctx.strokeRect(
+        fx * pixelSize + 0.5,
+        fy * pixelSize + 0.5,
+        floatingSelection.width * pixelSize - 1,
+        floatingSelection.height * pixelSize - 1
+      );
+      ctx.setLineDash([]);
+    }
+
+    // Draw selection rectangle with marching ants
+    if (selection) {
+      ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = -marchingAntsOffset;
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(
+        selection.x * pixelSize + 0.5,
+        selection.y * pixelSize + 0.5,
+        selection.width * pixelSize - 1,
+        selection.height * pixelSize - 1
+      );
+      ctx.strokeStyle = 'black';
+      ctx.lineDashOffset = -marchingAntsOffset + 4;
+      ctx.strokeRect(
+        selection.x * pixelSize + 0.5,
+        selection.y * pixelSize + 0.5,
+        selection.width * pixelSize - 1,
+        selection.height * pixelSize - 1
+      );
+      ctx.setLineDash([]);
+    }
+
+    // Draw selection in progress (while dragging)
+    if (isSelecting && selectionStart && selectionEnd) {
+      const sx = Math.min(selectionStart.x, selectionEnd.x);
+      const sy = Math.min(selectionStart.y, selectionEnd.y);
+      const sw = Math.abs(selectionEnd.x - selectionStart.x) + 1;
+      const sh = Math.abs(selectionEnd.y - selectionStart.y) + 1;
+
+      ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = -marchingAntsOffset;
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx * pixelSize + 0.5, sy * pixelSize + 0.5, sw * pixelSize - 1, sh * pixelSize - 1);
+      ctx.strokeStyle = 'black';
+      ctx.lineDashOffset = -marchingAntsOffset + 4;
+      ctx.strokeRect(sx * pixelSize + 0.5, sy * pixelSize + 0.5, sw * pixelSize - 1, sh * pixelSize - 1);
+      ctx.setLineDash([]);
+
+      // Semi-transparent overlay
+      ctx.fillStyle = 'rgba(100, 149, 237, 0.2)';
+      ctx.fillRect(sx * pixelSize, sy * pixelSize, sw * pixelSize, sh * pixelSize);
+    }
+  }, [sprite, zoom, showGrid, getCurrentFrame, selection, floatingSelection, isSelecting, selectionStart, selectionEnd, marchingAntsOffset]);
 
   // Re-render when state changes
   useEffect(() => {
     render();
   }, [render, state]);
+
+  // Marching ants animation
+  useEffect(() => {
+    if (!selection && !floatingSelection && !isSelecting) return;
+
+    const interval = setInterval(() => {
+      setMarchingAntsOffset(prev => (prev + 1) % 8);
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [selection, floatingSelection, isSelecting]);
+
+  // Keyboard shortcuts for selection (Escape to cancel, copy/paste handled in Toolbar)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        // Cancel floating selection or clear selection
+        if (floatingSelection) {
+          dispatch({ type: 'CANCEL_FLOATING_SELECTION' });
+        } else if (selection) {
+          dispatch({ type: 'SET_SELECTION', selection: null });
+        }
+      }
+
+      // Copy selection (Cmd/Ctrl + C)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c' && selection) {
+        dispatch({ type: 'COPY_SELECTION' });
+        e.preventDefault();
+      }
+
+      // Paste selection (Cmd/Ctrl + V)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'v' && state.copiedSelection) {
+        // Commit any existing floating selection first
+        if (floatingSelection) {
+          dispatch({ type: 'COMMIT_FLOATING_SELECTION' });
+        }
+        dispatch({ type: 'PASTE_SELECTION' });
+        e.preventDefault();
+      }
+
+      // Enter to commit floating selection
+      if (e.key === 'Enter' && floatingSelection) {
+        dispatch({ type: 'COMMIT_FLOATING_SELECTION' });
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selection, floatingSelection, state.copiedSelection, dispatch]);
 
   // Get pixel coordinates from mouse event
   const getPixelCoords = useCallback(
@@ -240,6 +387,20 @@ export function PixelCanvas() {
     ]
   );
 
+  // Check if a point is inside the floating selection
+  const isInsideFloatingSelection = useCallback(
+    (x: number, y: number): boolean => {
+      if (!floatingSelection) return false;
+      return (
+        x >= floatingSelection.x &&
+        x < floatingSelection.x + floatingSelection.width &&
+        y >= floatingSelection.y &&
+        y < floatingSelection.y + floatingSelection.height
+      );
+    },
+    [floatingSelection]
+  );
+
   // Mouse event handlers
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -255,12 +416,44 @@ export function PixelCanvas() {
       const coords = getPixelCoords(e);
       if (!coords) return;
 
+      // Handle floating selection
+      if (floatingSelection) {
+        if (isInsideFloatingSelection(coords.x, coords.y)) {
+          // Start dragging the floating selection
+          setIsDraggingFloating(true);
+          setFloatingDragOffset({
+            x: coords.x - floatingSelection.x,
+            y: coords.y - floatingSelection.y,
+          });
+          return;
+        } else {
+          // Clicked outside - commit the floating selection
+          dispatch({ type: 'COMMIT_FLOATING_SELECTION' });
+          return;
+        }
+      }
+
+      // Handle select tool
+      if (currentTool === 'select') {
+        // Clear existing selection
+        dispatch({ type: 'SET_SELECTION', selection: null });
+        setIsSelecting(true);
+        setSelectionStart(coords);
+        setSelectionEnd(coords);
+        return;
+      }
+
+      // Clear selection when using other tools
+      if (selection) {
+        dispatch({ type: 'SET_SELECTION', selection: null });
+      }
+
       setIsDrawing(true);
       setLastPos(null);
       setPendingPixels([]);
       handleDraw(coords, e.button === 2);
     },
-    [getPixelCoords, handleDraw, currentTool]
+    [getPixelCoords, handleDraw, currentTool, floatingSelection, isInsideFloatingSelection, dispatch, selection]
   );
 
   const handleMouseMove = useCallback(
@@ -268,14 +461,27 @@ export function PixelCanvas() {
       // Pan is handled by global handlers, skip here
       if (isPanning) return;
 
-      if (!isDrawing) return;
-
       const coords = getPixelCoords(e);
       if (!coords) return;
 
+      // Handle floating selection dragging
+      if (isDraggingFloating && floatingDragOffset && floatingSelection) {
+        const newX = coords.x - floatingDragOffset.x;
+        const newY = coords.y - floatingDragOffset.y;
+        dispatch({ type: 'MOVE_FLOATING_SELECTION', x: newX, y: newY });
+        return;
+      }
+
+      // Handle selection in progress
+      if (isSelecting) {
+        setSelectionEnd(coords);
+        return;
+      }
+
+      if (!isDrawing) return;
       handleDraw(coords, e.buttons === 2);
     },
-    [isDrawing, isPanning, lastPanPos, getPixelCoords, handleDraw]
+    [isDrawing, isPanning, isSelecting, isDraggingFloating, floatingDragOffset, floatingSelection, getPixelCoords, handleDraw, dispatch]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -285,17 +491,28 @@ export function PixelCanvas() {
       return;
     }
 
-    if (isDrawing && pendingPixels.length > 0) {
-      setPixelsBatch(pendingPixels);
+    // Finish floating selection drag
+    if (isDraggingFloating) {
+      setIsDraggingFloating(false);
+      setFloatingDragOffset(null);
+      return;
     }
-    setIsDrawing(false);
-    setLastPos(null);
-    setPendingPixels([]);
-  }, [isDrawing, isPanning, pendingPixels, setPixelsBatch]);
 
-  const handleMouseLeave = useCallback(() => {
-    // Don't stop panning when mouse leaves - let global handler manage it
-    if (isPanning) {
+    // Finish selection
+    if (isSelecting && selectionStart && selectionEnd) {
+      const x = Math.min(selectionStart.x, selectionEnd.x);
+      const y = Math.min(selectionStart.y, selectionEnd.y);
+      const width = Math.abs(selectionEnd.x - selectionStart.x) + 1;
+      const height = Math.abs(selectionEnd.y - selectionStart.y) + 1;
+
+      // Only create selection if it has area
+      if (width > 0 && height > 0) {
+        dispatch({ type: 'SET_SELECTION', selection: { x, y, width, height } });
+      }
+
+      setIsSelecting(false);
+      setSelectionStart(null);
+      setSelectionEnd(null);
       return;
     }
 
@@ -305,7 +522,26 @@ export function PixelCanvas() {
     setIsDrawing(false);
     setLastPos(null);
     setPendingPixels([]);
-  }, [isDrawing, isPanning, pendingPixels, setPixelsBatch]);
+  }, [isDrawing, isPanning, isSelecting, isDraggingFloating, selectionStart, selectionEnd, pendingPixels, setPixelsBatch, dispatch]);
+
+  const handleMouseLeave = useCallback(() => {
+    // Don't stop panning when mouse leaves - let global handler manage it
+    if (isPanning) {
+      return;
+    }
+
+    // Don't stop selection or floating drag on mouse leave
+    if (isSelecting || isDraggingFloating) {
+      return;
+    }
+
+    if (isDrawing && pendingPixels.length > 0) {
+      setPixelsBatch(pendingPixels);
+    }
+    setIsDrawing(false);
+    setLastPos(null);
+    setPendingPixels([]);
+  }, [isDrawing, isPanning, isSelecting, isDraggingFloating, pendingPixels, setPixelsBatch]);
 
   // Use ref for lastPanPos to avoid effect re-running on every move
   const lastPanPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -484,9 +720,13 @@ export function PixelCanvas() {
             onMouseLeave={handleMouseLeave}
             onContextMenu={handleContextMenu}
             className={`border border-editor-accent/50 shadow-lg block ${
-              currentTool === 'pan'
-                ? isPanning ? 'cursor-grabbing' : 'cursor-grab'
-                : 'cursor-crosshair'
+              floatingSelection
+                ? isDraggingFloating ? 'cursor-grabbing' : 'cursor-move'
+                : currentTool === 'pan'
+                  ? isPanning ? 'cursor-grabbing' : 'cursor-grab'
+                  : currentTool === 'select'
+                    ? 'cursor-crosshair'
+                    : 'cursor-crosshair'
             }`}
             style={{
               imageRendering: 'pixelated',

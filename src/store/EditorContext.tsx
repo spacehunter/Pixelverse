@@ -39,6 +39,23 @@ function createNewSprite(width: CanvasSize, height: CanvasSize, name: string = '
   };
 }
 
+// Selection rectangle
+interface Selection {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// Floating selection (pasted content that can be moved before committing)
+interface FloatingSelection {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  pixels: Map<string, Color>; // Relative coordinates within the selection
+}
+
 interface EditorState {
   sprite: Sprite | null;
   currentTool: Tool;
@@ -53,6 +70,9 @@ interface EditorState {
   history: HistoryEntry[];
   historyIndex: number;
   copiedFrame: Frame | null;
+  selection: Selection | null;
+  copiedSelection: { width: number; height: number; pixels: Map<string, Color> } | null;
+  floatingSelection: FloatingSelection | null;
 }
 
 interface HistoryEntry {
@@ -90,7 +110,13 @@ type EditorAction =
   | { type: 'LOAD_SPRITE'; sprite: Sprite }
   | { type: 'SET_PIXELS_BATCH'; pixels: Array<{ x: number; y: number; color: Color }> }
   | { type: 'COPY_FRAME' }
-  | { type: 'PASTE_FRAME' };
+  | { type: 'PASTE_FRAME' }
+  | { type: 'SET_SELECTION'; selection: Selection | null }
+  | { type: 'COPY_SELECTION' }
+  | { type: 'PASTE_SELECTION' }
+  | { type: 'MOVE_FLOATING_SELECTION'; x: number; y: number }
+  | { type: 'COMMIT_FLOATING_SELECTION' }
+  | { type: 'CANCEL_FLOATING_SELECTION' };
 
 // Create default sprite on startup
 const defaultSprite = createNewSprite(16, 16, 'Untitled');
@@ -109,6 +135,9 @@ const initialState: EditorState = {
   history: [{ sprite: cloneSprite(defaultSprite), timestamp: Date.now() }],
   historyIndex: 0,
   copiedFrame: null,
+  selection: null,
+  copiedSelection: null,
+  floatingSelection: null,
 };
 
 // Deep clone a sprite (handling Maps)
@@ -413,20 +442,36 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
     case 'UNDO': {
       if (state.historyIndex <= 0) return state;
       const newIndex = state.historyIndex - 1;
+      const restoredSprite = cloneSprite(state.history[newIndex].sprite);
+      // Ensure currentFrameIndex and currentLayerIndex stay within bounds
+      const maxFrameIndex = restoredSprite.frames.length - 1;
+      const newFrameIndex = Math.min(state.currentFrameIndex, maxFrameIndex);
+      const maxLayerIndex = restoredSprite.frames[newFrameIndex].layers.length - 1;
+      const newLayerIndex = Math.min(state.currentLayerIndex, maxLayerIndex);
       return {
         ...state,
-        sprite: cloneSprite(state.history[newIndex].sprite),
+        sprite: restoredSprite,
         historyIndex: newIndex,
+        currentFrameIndex: newFrameIndex,
+        currentLayerIndex: newLayerIndex,
       };
     }
 
     case 'REDO': {
       if (state.historyIndex >= state.history.length - 1) return state;
       const newIndex = state.historyIndex + 1;
+      const restoredSprite = cloneSprite(state.history[newIndex].sprite);
+      // Ensure currentFrameIndex and currentLayerIndex stay within bounds
+      const maxFrameIndex = restoredSprite.frames.length - 1;
+      const newFrameIndex = Math.min(state.currentFrameIndex, maxFrameIndex);
+      const maxLayerIndex = restoredSprite.frames[newFrameIndex].layers.length - 1;
+      const newLayerIndex = Math.min(state.currentLayerIndex, maxLayerIndex);
       return {
         ...state,
-        sprite: cloneSprite(state.history[newIndex].sprite),
+        sprite: restoredSprite,
         historyIndex: newIndex,
+        currentFrameIndex: newFrameIndex,
+        currentLayerIndex: newLayerIndex,
       };
     }
 
@@ -483,6 +528,124 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
         currentFrameIndex: state.currentFrameIndex + 1,
         history: newHistory,
         historyIndex: newHistory.length - 1,
+      };
+    }
+
+    case 'SET_SELECTION': {
+      return { ...state, selection: action.selection };
+    }
+
+    case 'COPY_SELECTION': {
+      if (!state.sprite || !state.selection) return state;
+      const frameIndex = Math.min(state.currentFrameIndex, state.sprite.frames.length - 1);
+      const frame = state.sprite.frames[frameIndex];
+      if (!frame) return state;
+
+      const { x, y, width, height } = state.selection;
+      const pixels = new Map<string, Color>();
+
+      // Copy pixels from all visible layers within the selection
+      for (const layer of frame.layers) {
+        if (!layer.visible) continue;
+        layer.pixels.forEach((color, key) => {
+          const [px, py] = key.split(',').map(Number);
+          // Check if pixel is within selection
+          if (px >= x && px < x + width && py >= y && py < y + height) {
+            // Store with relative coordinates
+            const relKey = createPixelKey(px - x, py - y);
+            pixels.set(relKey, color);
+          }
+        });
+      }
+
+      return {
+        ...state,
+        copiedSelection: { width, height, pixels },
+      };
+    }
+
+    case 'PASTE_SELECTION': {
+      if (!state.copiedSelection) return state;
+
+      // Create floating selection at top-left (0, 0)
+      const floatingSelection: FloatingSelection = {
+        x: 0,
+        y: 0,
+        width: state.copiedSelection.width,
+        height: state.copiedSelection.height,
+        pixels: new Map(state.copiedSelection.pixels),
+      };
+
+      return {
+        ...state,
+        floatingSelection,
+        selection: null, // Clear regular selection
+      };
+    }
+
+    case 'MOVE_FLOATING_SELECTION': {
+      if (!state.floatingSelection) return state;
+      return {
+        ...state,
+        floatingSelection: {
+          ...state.floatingSelection,
+          x: action.x,
+          y: action.y,
+        },
+      };
+    }
+
+    case 'COMMIT_FLOATING_SELECTION': {
+      if (!state.sprite || !state.floatingSelection) return state;
+
+      const sprite = cloneSprite(state.sprite);
+
+      // Safety check: ensure frame and layer indices are valid
+      const frameIndex = Math.min(state.currentFrameIndex, sprite.frames.length - 1);
+      const frame = sprite.frames[frameIndex];
+      if (!frame) return state;
+
+      const layerIndex = Math.min(state.currentLayerIndex, frame.layers.length - 1);
+      const layer = frame.layers[layerIndex];
+      if (!layer || layer.locked) return state;
+
+      const { x: offsetX, y: offsetY, pixels } = state.floatingSelection;
+
+      // Add floating selection pixels to the current layer
+      pixels.forEach((color, key) => {
+        const [relX, relY] = key.split(',').map(Number);
+        const absX = relX + offsetX;
+        const absY = relY + offsetY;
+
+        // Only place pixels within canvas bounds
+        if (absX >= 0 && absX < sprite.width && absY >= 0 && absY < sprite.height) {
+          const absKey = createPixelKey(absX, absY);
+          if (color.a > 0) {
+            layer.pixels.set(absKey, color);
+          }
+        }
+      });
+
+      // Add to history
+      const newHistory = state.history.slice(0, state.historyIndex + 1);
+      newHistory.push({ sprite: cloneSprite(sprite), timestamp: Date.now() });
+      if (newHistory.length > 50) newHistory.shift();
+
+      return {
+        ...state,
+        sprite,
+        floatingSelection: null,
+        currentFrameIndex: frameIndex,
+        currentLayerIndex: layerIndex,
+        history: newHistory,
+        historyIndex: newHistory.length - 1,
+      };
+    }
+
+    case 'CANCEL_FLOATING_SELECTION': {
+      return {
+        ...state,
+        floatingSelection: null,
       };
     }
 

@@ -3,9 +3,10 @@ import { useEditor } from '../store/EditorContext';
 
 export function AnimationTimeline() {
   const { state, dispatch } = useEditor();
-  const { sprite, currentFrameIndex, isPlaying, copiedFrame } = state;
+  const { sprite, currentFrameIndex, isPlaying, copiedFrame, floatingSelection, selection, copiedSelection } = state;
   const animationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
+  const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
 
   // Use refs to avoid stale closures in animation loop
   const frameIndexRef = useRef(currentFrameIndex);
@@ -81,18 +82,20 @@ export function AnimationTimeline() {
         return;
       }
 
-      // Cmd/Ctrl + C to copy frame
+      // Cmd/Ctrl + C to copy frame (only when no selection exists)
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && !e.shiftKey) {
-        // Don't prevent default to allow normal text copy
-        // Only copy frame if we have a sprite
-        if (sprite) {
+        // Only copy frame if we have a sprite and NO active selection
+        // If there's a selection, PixelCanvas handles copying the selection
+        if (sprite && !selection) {
           dispatch({ type: 'COPY_FRAME' });
         }
       }
 
-      // Cmd/Ctrl + V to paste frame
+      // Cmd/Ctrl + V to paste frame (only when no copied selection exists)
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v' && !e.shiftKey) {
-        if (sprite && copiedFrame) {
+        // Only paste frame if there's no copied selection
+        // If there's a copied selection, PixelCanvas handles pasting it
+        if (sprite && copiedFrame && !copiedSelection) {
           e.preventDefault();
           dispatch({ type: 'PASTE_FRAME' });
         }
@@ -101,7 +104,7 @@ export function AnimationTimeline() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [dispatch, sprite, copiedFrame]);
+  }, [dispatch, sprite, copiedFrame, selection, copiedSelection]);
 
   const handleAddFrame = () => {
     dispatch({ type: 'ADD_FRAME' });
@@ -129,8 +132,8 @@ export function AnimationTimeline() {
     dispatch({ type: 'SET_FRAME_DURATION', index, duration });
   };
 
-  // Render frame thumbnail
-  const renderFrameThumbnail = useCallback(
+  // Internal render function
+  const renderFrameThumbnailInternal = useCallback(
     (frameIndex: number, canvas: HTMLCanvasElement | null) => {
       if (!canvas || !sprite) return;
 
@@ -163,9 +166,55 @@ export function AnimationTimeline() {
           ctx.fillRect(x * scale, y * scale, scale, scale);
         });
       }
+
+      // Draw floating selection on the current frame's thumbnail
+      if (frameIndex === currentFrameIndex && floatingSelection) {
+        const { x: fx, y: fy, pixels } = floatingSelection;
+        pixels.forEach((color, key) => {
+          const [relX, relY] = key.split(',').map(Number);
+          const absX = relX + fx;
+          const absY = relY + fy;
+          if (absX >= 0 && absX < sprite.width && absY >= 0 && absY < sprite.height) {
+            ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a / 255})`;
+            ctx.fillRect(absX * scale, absY * scale, scale, scale);
+          }
+        });
+
+        // Draw a subtle border around the floating selection area
+        ctx.strokeStyle = 'rgba(233, 69, 96, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.strokeRect(
+          fx * scale,
+          fy * scale,
+          floatingSelection.width * scale,
+          floatingSelection.height * scale
+        );
+        ctx.setLineDash([]);
+      }
     },
-    [sprite]
+    [sprite, currentFrameIndex, floatingSelection]
   );
+
+  // Wrapper that stores the canvas ref and renders
+  const renderFrameThumbnail = useCallback(
+    (frameIndex: number, canvas: HTMLCanvasElement | null) => {
+      if (canvas) {
+        canvasRefs.current.set(frameIndex, canvas);
+      }
+      renderFrameThumbnailInternal(frameIndex, canvas);
+    },
+    [renderFrameThumbnailInternal]
+  );
+
+  // Re-render current frame thumbnail when floating selection changes
+  useEffect(() => {
+    if (!sprite) return;
+    const canvas = canvasRefs.current.get(currentFrameIndex);
+    if (canvas) {
+      renderFrameThumbnailInternal(currentFrameIndex, canvas);
+    }
+  }, [floatingSelection, currentFrameIndex, sprite, renderFrameThumbnailInternal]);
 
   if (!sprite) {
     return (
@@ -174,6 +223,21 @@ export function AnimationTimeline() {
           Animation
         </h3>
         <p className="text-xs text-gray-500">No sprite loaded</p>
+      </div>
+    );
+  }
+
+  // Safety check: ensure currentFrameIndex is valid
+  const safeFrameIndex = Math.min(currentFrameIndex, sprite.frames.length - 1);
+  const currentFrame = sprite.frames[safeFrameIndex];
+
+  if (!currentFrame) {
+    return (
+      <div className="panel p-3">
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+          Animation
+        </h3>
+        <p className="text-xs text-gray-500">Loading...</p>
       </div>
     );
   }
@@ -269,15 +333,15 @@ export function AnimationTimeline() {
       {/* Frame duration */}
       <div className="border-t border-editor-accent/30 pt-3 mt-3">
         <label className="text-xs text-gray-400 block mb-1">
-          Frame {currentFrameIndex + 1} Duration: {sprite.frames[currentFrameIndex].duration}ms
+          Frame {safeFrameIndex + 1} Duration: {currentFrame.duration}ms
         </label>
         <input
           type="range"
           min="50"
           max="1000"
           step="50"
-          value={sprite.frames[currentFrameIndex].duration}
-          onChange={e => handleDurationChange(currentFrameIndex, parseInt(e.target.value))}
+          value={currentFrame.duration}
+          onChange={e => handleDurationChange(safeFrameIndex, parseInt(e.target.value))}
           className="w-full accent-editor-highlight"
         />
       </div>
@@ -289,7 +353,10 @@ export function AnimationTimeline() {
           1000 / (sprite.frames.reduce((sum, f) => sum + f.duration, 0) / sprite.frames.length)
         )}{' '}
         FPS avg
-        {copiedFrame && (
+        {copiedSelection && (
+          <span className="ml-2 text-purple-400">• Selection copied</span>
+        )}
+        {copiedFrame && !copiedSelection && (
           <span className="ml-2 text-editor-highlight">• Frame copied</span>
         )}
       </div>

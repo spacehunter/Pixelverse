@@ -7,6 +7,7 @@ const tools: { id: Tool; name: string; icon: string; shortcut: string }[] = [
   { id: 'eraser', name: 'Eraser', icon: '🧹', shortcut: 'E' },
   { id: 'fill', name: 'Fill', icon: '🪣', shortcut: 'F' },
   { id: 'eyedropper', name: 'Eyedropper', icon: '💧', shortcut: 'I' },
+  { id: 'select', name: 'Select', icon: '⬚', shortcut: 'S' },
   { id: 'pan', name: 'Pan', icon: '✋', shortcut: 'H' },
   { id: 'line', name: 'Line', icon: '📏', shortcut: 'L' },
   { id: 'rectangle', name: 'Rectangle', icon: '⬜', shortcut: 'R' },
@@ -27,14 +28,7 @@ export function Toolbar() {
 
       const key = e.key.toLowerCase();
 
-      // Tool shortcuts
-      const tool = tools.find(t => t.shortcut.toLowerCase() === key);
-      if (tool) {
-        setTool(tool.id);
-        return;
-      }
-
-      // Other shortcuts
+      // Modifier key shortcuts (check these first, before tool shortcuts)
       if (e.ctrlKey || e.metaKey) {
         switch (key) {
           case 'z':
@@ -54,6 +48,15 @@ export function Toolbar() {
             e.preventDefault();
             break;
         }
+        // Don't process tool shortcuts when Ctrl/Cmd is held
+        return;
+      }
+
+      // Tool shortcuts (only when no modifier keys)
+      const tool = tools.find(t => t.shortcut.toLowerCase() === key);
+      if (tool) {
+        setTool(tool.id);
+        return;
       }
 
       // Brush size shortcuts

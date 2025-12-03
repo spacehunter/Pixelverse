@@ -5,11 +5,13 @@ AI-powered pixel art sprite editor. Create sprites in seconds with Retro Diffusi
 ## Features
 
 - **AI Sprite Generation** - Generate pixel art from text prompts using Retro Diffusion models (rd-fast, rd-plus)
-- **Drawing Tools** - Pencil, eraser, fill bucket, eyedropper, line, rectangle, circle
+- **Smart Prompt Enhancer** - AI-powered idea generation with Groq, expandable color palettes (80+ color variations), and context-aware modifiers
+- **Drawing Tools** - Pencil, eraser, fill bucket, eyedropper, selection, line, rectangle, circle
+- **Selection Tool** - Select, copy, and paste portions of your canvas with marching ants animation
 - **Pan & Zoom** - Fast 30x accelerated panning for quick navigation, zoom up to 100x
 - **Layers** - Multiple layers with visibility, opacity, and lock controls
 - **Animation** - Multi-frame animation with adjustable frame durations and playback
-- **Frame Copy/Paste** - Quickly duplicate frames with Cmd/Ctrl+C/V
+- **Frame & Selection Copy/Paste** - Copy entire frames or just selected areas with Cmd/Ctrl+C/V
 - **Color Palettes** - Built-in NES, Game Boy, and PICO-8 palettes
 - **Export Options** - Native save dialog, project files (.pixelverse), PNG, spritesheets, GIF
 - **1:1 Preview** - Real-time actual-size preview while editing
@@ -22,7 +24,9 @@ npm install
 
 # Set up environment variables
 cp .env.example .env
-# Edit .env and add your Replicate API token
+# Edit .env and add your API tokens:
+# - VITE_REPLICATE_API_TOKEN for AI sprite generation
+# - VITE_GROQ_API_KEY for AI-powered prompt suggestions (optional)
 
 # Start development server
 npm run dev
@@ -41,6 +45,7 @@ To use AI sprite generation, get your API token from [Replicate](https://replica
 | Eraser | E |
 | Fill | F |
 | Eyedropper | I |
+| Select | S |
 | Pan | H |
 | Line | L |
 | Rectangle | R |
@@ -50,8 +55,10 @@ To use AI sprite generation, get your API token from [Replicate](https://replica
 | Redo | Cmd/Ctrl + Y |
 | Toggle Grid | Cmd/Ctrl + G |
 | Brush Size | [ / ] |
-| Copy Frame | Cmd/Ctrl + C |
-| Paste Frame | Cmd/Ctrl + V |
+| Copy (Frame or Selection) | Cmd/Ctrl + C |
+| Paste (Frame or Selection) | Cmd/Ctrl + V |
+| Commit Selection | Enter |
+| Cancel Selection | Escape |
 | Save Project | Cmd/Ctrl + S |
 
 ## AI Generation

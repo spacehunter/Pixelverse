@@ -14,6 +14,14 @@ export default defineConfig({
           'Origin': 'https://api.replicate.com',
         },
       },
+      '/api/groq': {
+        target: 'https://api.groq.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/groq/, ''),
+        headers: {
+          'Origin': 'https://api.groq.com',
+        },
+      },
     },
   },
 })
