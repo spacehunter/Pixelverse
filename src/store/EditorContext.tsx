@@ -230,7 +230,8 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
       if (!state.sprite) return state;
       const sprite = cloneSprite(state.sprite);
       sprite.frames.push(createEmptyFrame());
-      return { ...state, sprite };
+      // Select the newly created frame
+      return { ...state, sprite, currentFrameIndex: sprite.frames.length - 1 };
     }
 
     case 'DELETE_FRAME': {

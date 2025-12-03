@@ -11,7 +11,7 @@ AI-powered pixel art sprite editor. Create sprites in seconds with Retro Diffusi
 - **Animation** - Multi-frame animation with adjustable frame durations and playback
 - **Frame Copy/Paste** - Quickly duplicate frames with Cmd/Ctrl+C/V
 - **Color Palettes** - Built-in NES, Game Boy, and PICO-8 palettes
-- **Export Options** - Save projects (.pixelverse), export PNG, spritesheets, or GIF
+- **Export Options** - Native save dialog, project files (.pixelverse), PNG, spritesheets, GIF
 - **1:1 Preview** - Real-time actual-size preview while editing
 
 ## Getting Started

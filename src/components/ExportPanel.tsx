@@ -208,29 +208,53 @@ export function ExportPanel() {
     return canvas?.toDataURL('image/png') || '';
   }, [renderSpriteToCanvas, state.currentFrameIndex, exportScale]);
 
-  // Save project as JSON file
-  const saveProject = useCallback((skipPrompt = false) => {
+  // Save project as JSON file using native file picker when available
+  const saveProject = useCallback(async () => {
     if (!sprite) return;
 
-    let name = fileName.trim() || sprite.name || 'project';
+    const name = fileName.trim() || sprite.name || 'project';
+    const data = spriteToJSON(sprite);
+    const jsonString = JSON.stringify(data, null, 2);
+    const saveFileName = `${name}.pixelverse`;
 
-    if (!skipPrompt) {
-      const promptedName = prompt('Save project as:', name);
-      if (promptedName === null) return; // User cancelled
-      name = promptedName.trim() || name;
-      setFileName(name);
+    // Try to use the File System Access API (native save dialog)
+    if ('showSaveFilePicker' in window) {
+      try {
+        const options = {
+          suggestedName: saveFileName,
+          types: [{
+            description: 'Pixelverse Project',
+            accept: { 'application/json': ['.pixelverse'] },
+          }],
+        };
+
+        const showSaveFilePicker = (window as any).showSaveFilePicker;
+        const fileHandle = await showSaveFilePicker(options);
+        const writable = await fileHandle.createWritable();
+
+        // Write the JSON string directly
+        await writable.write(jsonString);
+        await writable.close();
+
+        // Update filename from saved file
+        const savedName = fileHandle.name.replace(/\.pixelverse$/, '');
+        setFileName(savedName);
+        return;
+      } catch (err: any) {
+        // User cancelled - just return
+        if (err.name === 'AbortError') return;
+        // Other error - fall through to download
+        console.error('Save picker failed:', err);
+      }
     }
 
-    const data = spriteToJSON(sprite);
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
+    // Fallback: Use traditional download
+    const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement('a');
-    link.download = `${name}.pixelverse`;
+    link.download = saveFileName;
     link.href = url;
     link.click();
-
     URL.revokeObjectURL(url);
   }, [sprite, fileName]);
 
@@ -268,7 +292,7 @@ export function ExportPanel() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (sprite) {
-          saveProject(false); // Show prompt
+          saveProject();
         }
       }
     };
@@ -308,7 +332,7 @@ export function ExportPanel() {
 
       {/* Save/Load Project */}
       <div className="flex gap-2">
-        <button onClick={() => saveProject(false)} className="flex-1 btn-primary text-xs py-2">
+        <button onClick={() => saveProject()} className="flex-1 btn-primary text-xs py-2">
           Save Project
         </button>
         <button onClick={loadProject} className="flex-1 btn-secondary text-xs py-2">

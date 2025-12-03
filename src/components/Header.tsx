@@ -19,28 +19,57 @@ export function Header() {
     setShowNewDialog(false);
   };
 
-  // Save sprite to JSON
-  const handleSave = () => {
+  // Save sprite to JSON using native file picker when available
+  const handleSave = async () => {
     if (!sprite) return;
 
-    // Convert Maps to objects for JSON serialization
+    // Convert Maps to arrays for JSON serialization
     const spriteData = {
       ...sprite,
       frames: sprite.frames.map(frame => ({
         ...frame,
         layers: frame.layers.map(layer => ({
           ...layer,
-          pixels: Object.fromEntries(layer.pixels),
+          pixels: Array.from(layer.pixels.entries()),
         })),
       })),
     };
 
-    const blob = new Blob([JSON.stringify(spriteData, null, 2)], {
-      type: 'application/json',
-    });
+    const jsonString = JSON.stringify(spriteData, null, 2);
+    const fileName = `${sprite.name || 'sprite'}.pixelverse`;
+
+    // Try to use the File System Access API (native save dialog)
+    if ('showSaveFilePicker' in window) {
+      try {
+        const options = {
+          suggestedName: fileName,
+          types: [{
+            description: 'Pixelverse Project',
+            accept: { 'application/json': ['.pixelverse'] },
+          }],
+        };
+
+        const showSaveFilePicker = (window as any).showSaveFilePicker;
+        const fileHandle = await showSaveFilePicker(options);
+        const writable = await fileHandle.createWritable();
+
+        // Write the JSON string directly
+        await writable.write(jsonString);
+        await writable.close();
+        return;
+      } catch (err: any) {
+        // User cancelled - just return
+        if (err.name === 'AbortError') return;
+        // Other error - fall through to download
+        console.error('Save picker failed:', err);
+      }
+    }
+
+    // Fallback: Use traditional download
+    const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.download = `${sprite.name || 'sprite'}.pixelverse.json`;
+    link.download = fileName;
     link.href = url;
     link.click();
     URL.revokeObjectURL(url);
@@ -60,7 +89,7 @@ export function Header() {
       try {
         const data = JSON.parse(event.target?.result as string);
 
-        // Convert pixel objects back to Maps
+        // Convert pixels back to Maps (handle both array and object formats)
         const sprite: Sprite = {
           ...data,
           createdAt: new Date(data.createdAt),
@@ -69,7 +98,10 @@ export function Header() {
             ...frame,
             layers: frame.layers.map((layer: any) => ({
               ...layer,
-              pixels: new Map(Object.entries(layer.pixels)),
+              // Handle both array format [[key, value], ...] and object format {key: value}
+              pixels: Array.isArray(layer.pixels)
+                ? new Map(layer.pixels)
+                : new Map(Object.entries(layer.pixels)),
             })),
           })),
         };
@@ -117,7 +149,7 @@ export function Header() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".json,.pixelverse.json"
+              accept=".pixelverse,.json"
               onChange={handleFileChange}
               className="hidden"
             />
