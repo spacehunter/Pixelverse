@@ -28,6 +28,7 @@ export interface Frame {
   id: string;
   layers: Layer[];
   duration: number; // milliseconds
+  aiPrompt?: string; // AI generation prompt used to create this frame
 }
 
 export interface Sprite {

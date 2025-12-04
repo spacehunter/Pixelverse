@@ -102,6 +102,7 @@ type EditorAction =
   | { type: 'REORDER_LAYERS'; fromIndex: number; toIndex: number }
   | { type: 'TOGGLE_PLAY' }
   | { type: 'SET_FRAME_DURATION'; index: number; duration: number }
+  | { type: 'SET_FRAME_AI_PROMPT'; index: number; prompt: string }
   | { type: 'SET_BRUSH_SIZE'; size: number }
   | { type: 'FILL_AREA'; x: number; y: number; color: Color }
   | { type: 'CLEAR_CANVAS' }
@@ -350,6 +351,13 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, sprite };
     }
 
+    case 'SET_FRAME_AI_PROMPT': {
+      if (!state.sprite) return state;
+      const sprite = cloneSprite(state.sprite);
+      sprite.frames[action.index].aiPrompt = action.prompt;
+      return { ...state, sprite };
+    }
+
     case 'SET_BRUSH_SIZE':
       return { ...state, brushSize: Math.max(1, Math.min(10, action.size)) };
 
@@ -561,6 +569,7 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         copiedSelection: { width, height, pixels },
+        selection: null, // Clear selection after copying
       };
     }
 
@@ -635,6 +644,7 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
         ...state,
         sprite,
         floatingSelection: null,
+        copiedSelection: null, // Clear copied selection after committing
         currentFrameIndex: frameIndex,
         currentLayerIndex: layerIndex,
         history: newHistory,
@@ -646,6 +656,7 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         floatingSelection: null,
+        copiedSelection: null, // Clear copied selection when cancelling
       };
     }
 

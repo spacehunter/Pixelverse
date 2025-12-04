@@ -28,6 +28,7 @@ function jsonToSprite(json: ReturnType<typeof spriteToJSON>): Sprite {
     frames: Array<{
       id: string;
       duration: number;
+      aiPrompt?: string; // AI generation prompt used to create this frame
       layers: Array<{
         id: string;
         name: string;

@@ -400,6 +400,18 @@ export function AIGenerationPanel() {
 
   const availableStyles = selectedModel === 'rd-fast' ? RD_FAST_STYLES : RD_PLUS_STYLES;
 
+  // Sync prompt with current frame's aiPrompt when frame changes or project loads
+  useEffect(() => {
+    if (sprite && sprite.frames[currentFrameIndex]) {
+      const currentFrame = sprite.frames[currentFrameIndex];
+      // Load the frame's AI prompt if it exists, otherwise clear for a fresh start
+      setPrompt(currentFrame.aiPrompt || '');
+      // Clear AI-generated suggestions when switching frames
+      setAiGeneratedIdeas(null);
+      setAiGeneratedDetails(null);
+    }
+  }, [sprite?.id, currentFrameIndex]); // Re-run when sprite is loaded or frame changes
+
   // Handle click outside to close color popup
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -478,12 +490,17 @@ export function AIGenerationPanel() {
     setIsGenerating(true);
 
     try {
+      // Determine target frame index before any dispatches
+      let targetFrameIndex = state.currentFrameIndex;
+
       // Create sprite if none exists or size changed
       if (!sprite || sprite.width !== selectedSize) {
         createSprite(selectedSize, selectedSize, prompt.substring(0, 20));
+        targetFrameIndex = 0; // New sprite starts at frame 0
       } else if (!isCurrentFrameBlank()) {
         // If current frame has content, add a new frame to avoid overwriting
         dispatch({ type: 'ADD_FRAME' });
+        targetFrameIndex = sprite.frames.length; // The new frame index
       }
 
       // Generate using Replicate AI service
@@ -517,6 +534,13 @@ export function AIGenerationPanel() {
             y: p.y,
             color: p.color,
           })),
+        });
+
+        // Store the AI prompt with this frame
+        dispatch({
+          type: 'SET_FRAME_AI_PROMPT',
+          index: targetFrameIndex,
+          prompt: prompt,
         });
       }
     } catch (err) {
@@ -711,6 +735,69 @@ export function AIGenerationPanel() {
               </div>
             </div>
 
+            {/* Add Details - AI Generated or Context-Aware */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider">
+                  Add Details
+                </label>
+                {aiGeneratedDetails && (
+                  <span className="text-[9px] text-purple-400 flex items-center gap-1">
+                    <span>✨</span> AI Generated
+                  </span>
+                )}
+              </div>
+              {aiGeneratedDetails ? (
+                <div className="flex flex-wrap gap-1">
+                  {aiGeneratedDetails.map((detail, idx) => (
+                    <button
+                      key={`${detail.label}-${idx}`}
+                      onClick={() => handleModifierClick(detail.text)}
+                      className="flex items-center gap-1 text-[11px] px-2 py-1 bg-purple-600/30 border border-purple-500/30 rounded hover:bg-purple-500/50 transition-colors"
+                      disabled={isGenerating || isGeneratingIdeas}
+                      title={`Add "${detail.text}"`}
+                    >
+                      <span>{detail.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : contextModifiers.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {contextModifiers.map((mod, idx) => (
+                    <button
+                      key={`${mod.label}-${idx}`}
+                      onClick={() => handleModifierClick(mod.text)}
+                      className="flex items-center gap-1 text-[11px] px-2 py-1 bg-editor-accent/40 rounded hover:bg-editor-highlight/50 transition-colors group"
+                      disabled={isGenerating}
+                      title={`Add "${mod.text}"`}
+                    >
+                      {mod.icon && <span className="text-xs">{mod.icon}</span>}
+                      <span>{mod.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : prompt.trim() ? (
+                <div className="text-[10px] text-gray-500 italic">
+                  All detail suggestions added
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {GENERAL_MODIFIERS.map((mod, idx) => (
+                    <button
+                      key={`${mod.label}-${idx}`}
+                      onClick={() => handleModifierClick(mod.text)}
+                      className="flex items-center gap-1 text-[11px] px-2 py-1 bg-editor-accent/40 rounded hover:bg-editor-highlight/50 transition-colors group"
+                      disabled={isGenerating}
+                      title={`Add "${mod.text}"`}
+                    >
+                      {mod.icon && <span className="text-xs">{mod.icon}</span>}
+                      <span>{mod.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Color Palette with Expandable Families */}
             <div className="relative">
               <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
@@ -812,56 +899,6 @@ export function AIGenerationPanel() {
                 </div>
               )}
             </div>
-
-            {/* Add Details - AI Generated or Context-Aware */}
-            {(aiGeneratedDetails || contextModifiers.length > 0 || !prompt.trim()) && (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wider">
-                    {aiGeneratedDetails
-                      ? 'Add Details'
-                      : prompt.trim()
-                        ? 'Add Details'
-                        : 'Start typing to see suggestions'}
-                  </label>
-                  {aiGeneratedDetails && (
-                    <span className="text-[9px] text-purple-400 flex items-center gap-1">
-                      <span>✨</span> AI Generated
-                    </span>
-                  )}
-                </div>
-                {aiGeneratedDetails ? (
-                  <div className="flex flex-wrap gap-1">
-                    {aiGeneratedDetails.map((detail, idx) => (
-                      <button
-                        key={`${detail.label}-${idx}`}
-                        onClick={() => handleModifierClick(detail.text)}
-                        className="flex items-center gap-1 text-[11px] px-2 py-1 bg-purple-600/30 border border-purple-500/30 rounded hover:bg-purple-500/50 transition-colors"
-                        disabled={isGenerating || isGeneratingIdeas}
-                        title={`Add "${detail.text}"`}
-                      >
-                        <span>{detail.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : contextModifiers.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {contextModifiers.map((mod, idx) => (
-                      <button
-                        key={`${mod.label}-${idx}`}
-                        onClick={() => handleModifierClick(mod.text)}
-                        className="flex items-center gap-1 text-[11px] px-2 py-1 bg-editor-accent/40 rounded hover:bg-editor-highlight/50 transition-colors group"
-                        disabled={isGenerating}
-                        title={`Add "${mod.text}"`}
-                      >
-                        {mod.icon && <span className="text-xs">{mod.icon}</span>}
-                        <span>{mod.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -949,27 +986,29 @@ export function AIGenerationPanel() {
       )}
 
       {/* Generate Button */}
-      <button
-        onClick={handleGenerate}
-        disabled={isGenerating || !prompt.trim()}
-        className={`w-full py-2 px-4 rounded font-medium transition-colors flex items-center justify-center gap-2 ${
-          isGenerating || !prompt.trim()
-            ? 'bg-editor-accent/50 text-gray-500 cursor-not-allowed'
-            : 'bg-editor-highlight hover:bg-editor-highlight/80 text-white'
-        }`}
-      >
-        {isGenerating ? (
-          <>
-            <span className="animate-spin">⚙️</span>
-            Generating...
-          </>
-        ) : (
-          <>
-            <span>✨</span>
-            Generate Sprite
-          </>
-        )}
-      </button>
+      <div className={`generate-btn-wrapper ${isGenerating ? 'is-generating' : ''}`}>
+        <button
+          onClick={handleGenerate}
+          disabled={isGenerating || !prompt.trim()}
+          className={`w-full py-2 px-4 rounded font-medium transition-colors flex items-center justify-center gap-2 ${
+            isGenerating || !prompt.trim()
+              ? 'bg-editor-accent/50 text-gray-500 cursor-not-allowed'
+              : 'bg-editor-highlight hover:bg-editor-highlight/80 text-white'
+          }`}
+        >
+          {isGenerating ? (
+            <>
+              <span className="animate-spin">⚙️</span>
+              Generating...
+            </>
+          ) : (
+            <>
+              <span>✨</span>
+              Generate Sprite
+            </>
+          )}
+        </button>
+      </div>
 
       {/* Generated Image Preview */}
       {generatedImageUrl && (
