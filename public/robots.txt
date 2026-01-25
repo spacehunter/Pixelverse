@@ -1,0 +1,11 @@
+# Pixelverse.cloud Robots.txt
+# AI Sprite Generator for Game Developers
+
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://pixelverse.cloud/sitemap.xml
+
+# Crawl-delay (optional, be nice to bots)
+Crawl-delay: 1
